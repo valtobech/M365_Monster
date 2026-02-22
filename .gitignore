@@ -28,3 +28,6 @@ Desktop.ini
 # IDE / éditeur
 .vscode/
 .idea/
+
+# Config auto-update (propre à chaque installation)
+update_config.json
