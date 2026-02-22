@@ -1,6 +1,6 @@
 # Référence Projet — M365 Monster
 
-> **Version :** 2.1
+> **Version :** 2.2
 > **Date :** 2026-02-22
 > **Portée :** Gestion du cycle de vie employé dans Microsoft 365 / Entra ID, avec interface graphique WinForms, multi-client, multi-langue.
 
@@ -212,6 +212,42 @@ Voir `docs/RELEASE_PROCESS.md`.
 | Sécurité | Jamais de mot de passe en clair dans les logs ou fichiers |
 | Logs | Écrits dans `%APPDATA%\M365Monster\Logs` |
 | PowerShell | PS7 requis, détection auto dans Install/Main |
+
+---
+
+---
+
+## 9. Permissions API Microsoft Graph
+
+> Toutes les permissions sont de type **Délégué** (`Delegated`) — connexion interactive uniquement.
+> Admin consent requis sur chaque tenant client.
+
+| Permission | Usage dans M365 Monster |
+|---|---|
+| `User.ReadWrite.All` | Créer, modifier (profil, téléphones, UPN), désactiver/réactiver des comptes |
+| `Group.ReadWrite.All` | Ajouter/retirer des utilisateurs des groupes (licences, sécurité) |
+| `Directory.ReadWrite.All` | Lire les domaines vérifiés du tenant, accès annuaire étendu |
+| `Mail.Send` | Envoyer les notifications email via `/me/sendMail` |
+| `UserAuthenticationMethod.ReadWrite.All` | Lire et supprimer les méthodes MFA (module Modification — Reset MFA) |
+| `AuditLog.Read.All` | Lire les journaux de connexion (module Modification — Dernières connexions) |
+
+### Notes importantes
+
+- **Téléphones et alias email** : `Update-MgUser` est bloqué par Exchange Online sur `mobilePhone`, `businessPhones` et `proxyAddresses`. L'outil utilise `Invoke-MgGraphRequest PATCH` directement sur `/v1.0/users/{id}` pour contourner cette restriction.
+- **Token en cache** : si `Forbidden (403)` apparaît après ajout d'un scope, fermer et relancer l'outil pour forcer un nouveau token.
+- **proxyAddresses** : Exchange Online gère les alias de façon autonome. L'ajout/suppression via Graph fonctionne uniquement si la boîte Exchange Online est active et que le compte connecté a les droits suffisants.
+
+---
+
+## 10. Historique des versions
+
+Voir [CHANGELOG.md](CHANGELOG.md) pour le détail complet de chaque version.
+
+| Version | Date | Résumé |
+|---|---|---|
+| `0.1.2` | 2026-02-22 | Corrections module Modification : alias, téléphones, groupes, UX |
+| `0.1.1` | 2026-02-22 | Corrections UX module Modification : scroll, combos, permissions |
+| `0.1.0` | 2026-02-22 | Version bêta initiale |
 
 ---
 
