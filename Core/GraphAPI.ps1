@@ -71,8 +71,9 @@ function Search-AzUsers {
         Write-Log -Level "INFO" -Action "SEARCH_USERS" -Message "Recherche d'utilisateurs : '$SearchTerm'"
 
         # CHOIX: Recherche sur displayName et userPrincipalName avec ConsistencyLevel eventual
-        $filter = "startsWith(displayName,'$SearchTerm') or startsWith(userPrincipalName,'$SearchTerm')"
-        $users = Get-MgUser -Filter $filter -Top $MaxResults -Property "id,displayName,userPrincipalName,department,jobTitle,accountEnabled" -ConsistencyLevel "eventual" -CountVariable countVar -ErrorAction Stop
+        # Recherche sur displayName, UPN et mail (pour trouver par alias type "adupontel")
+        $filter = "startsWith(displayName,'$SearchTerm') or startsWith(userPrincipalName,'$SearchTerm') or startsWith(mail,'$SearchTerm')"
+        $users = Get-MgUser -Filter $filter -Top $MaxResults -Property "id,displayName,userPrincipalName,department,jobTitle,accountEnabled,mail" -ConsistencyLevel "eventual" -CountVariable countVar -ErrorAction Stop
 
         return [PSCustomObject]@{ Success = $true; Data = $users; Error = $null }
     }
@@ -582,17 +583,20 @@ function Reset-AzUserPassword {
         [string]$UserId,
 
         [Parameter(Mandatory = $true)]
-        [string]$NewPassword,
+        [SecureString]$NewPassword,
 
         [bool]$ForceChange = $true
     )
 
     try {
-        # Ne PAS logger le mot de passe
+        # Ne PAS logger le mot de passe — conversion SecureString -> plaintext uniquement pour l'appel Graph
         Write-Log -Level "INFO" -Action "RESET_PASSWORD" -UPN $UserId -Message "Réinitialisation du mot de passe."
 
+        $plainPassword   = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
+            [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($NewPassword)
+        )
         $passwordProfile = @{
-            Password                      = $NewPassword
+            Password                      = $plainPassword
             ForceChangePasswordNextSignIn  = $ForceChange
         }
 
@@ -663,7 +667,7 @@ function Test-AzUserExists {
     )
 
     try {
-        $user = Get-MgUser -UserId $UPN -Property "id" -ErrorAction Stop
+        $null = Get-MgUser -UserId $UPN -Property "id" -ErrorAction Stop
         return $true
     }
     catch {
@@ -691,7 +695,7 @@ function Get-AzDistinctValues {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet("department", "jobTitle", "employeeType", "usageLocation")]
+        [ValidateSet("department", "jobTitle", "employeeType", "usageLocation", "officeLocation")]
         [string]$Property,
 
         [int]$MaxUsers = 999
