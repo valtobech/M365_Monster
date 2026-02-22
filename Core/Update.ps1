@@ -176,12 +176,31 @@ function Test-UpdateAvailable {
     }
 }
 
+function Test-AdminRights {
+    <#
+    .SYNOPSIS
+        Vérifie si le processus courant a les droits administrateur.
+    .OUTPUTS
+        [bool]
+    #>
+    $identity  = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
 function Invoke-AutoUpdate {
     <#
     .SYNOPSIS
         Vérifie et propose la mise à jour au lancement de l'application.
         Affiche une popup si une mise à jour est disponible.
-        Télécharge, extrait et remplace les fichiers si l'utilisateur accepte.
+
+        Stratégie d'élévation :
+        - Téléchargement et extraction dans %TEMP% — pas de droits requis.
+        - Génération d'un script de copie temporaire dans %TEMP%.
+        - Si l'installation est dans Program Files et que le processus
+          n'est pas admin : relance le script de copie avec Start-Process -Verb RunAs
+          (prompt UAC unique, visible et attendu par l'utilisateur).
+        - Si déjà admin (ou hors Program Files) : copie directe.
 
     .PARAMETER RootPath
         Chemin racine du projet.
@@ -221,16 +240,19 @@ function Invoke-AutoUpdate {
         return $false
     }
 
-    # Téléchargement
-    $tempZip = Join-Path -Path $env:TEMP -ChildPath "M365Monster_update_$($updateInfo.RemoteVersion).zip"
-    $tempExtract = Join-Path -Path $env:TEMP -ChildPath "M365Monster_update_extract"
+    # Chemins temporaires (accessibles sans droits admin)
+    $tempZip      = Join-Path -Path $env:TEMP -ChildPath "M365Monster_update_$($updateInfo.RemoteVersion).zip"
+    $tempExtract  = Join-Path -Path $env:TEMP -ChildPath "M365Monster_update_extract"
+    $tempScript   = Join-Path -Path $env:TEMP -ChildPath "M365Monster_apply_update.ps1"
+    $stampFile    = Join-Path -Path $env:TEMP -ChildPath "M365Monster_update_done.txt"
 
     try {
         # Nettoyage préalable
-        if (Test-Path $tempZip) { Remove-Item $tempZip -Force }
-        if (Test-Path $tempExtract) { Remove-Item $tempExtract -Recurse -Force }
+        @($tempZip, $tempExtract, $tempScript, $stampFile) | ForEach-Object {
+            if (Test-Path $_) { Remove-Item $_ -Recurse -Force -ErrorAction SilentlyContinue }
+        }
 
-        # Téléchargement du .zip
+        # --- Étape 1 : Téléchargement (sans droits admin) ---
         $webClient = New-Object System.Net.WebClient
         $webClient.Headers.Add("User-Agent", "M365Monster-Updater")
         if ($updateInfo.Headers.ContainsKey("Authorization")) {
@@ -238,59 +260,126 @@ function Invoke-AutoUpdate {
         }
         $webClient.DownloadFile($updateInfo.DownloadUrl, $tempZip)
 
-        # Extraction
+        # --- Étape 2 : Extraction (sans droits admin) ---
         Expand-Archive -Path $tempZip -DestinationPath $tempExtract -Force
+        Remove-Item $tempZip -Force -ErrorAction SilentlyContinue
 
-        # Trouver le dossier racine dans le zip (peut être M365Monster/ ou direct)
+        # Trouver le dossier racine dans le zip
         $extractedContent = Get-ChildItem -Path $tempExtract
         $sourceDir = $tempExtract
         if ($extractedContent.Count -eq 1 -and $extractedContent[0].PSIsContainer) {
             $sourceDir = $extractedContent[0].FullName
         }
 
-        # Sauvegarder les fichiers client (Clients/*.json et Logs/)
-        $backupDir = Join-Path -Path $env:TEMP -ChildPath "M365Monster_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
-        New-Item -Path $backupDir -ItemType Directory -Force | Out-Null
-
-        $clientsDir = Join-Path -Path $RootPath -ChildPath "Clients"
-        if (Test-Path $clientsDir) {
-            Copy-Item -Path $clientsDir -Destination $backupDir -Recurse -Force
-        }
-
+        # Chemins de sauvegarde et restauration
+        $backupDir        = Join-Path -Path $env:TEMP -ChildPath "M365Monster_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+        $clientsDir       = Join-Path -Path $RootPath -ChildPath "Clients"
         $updateConfigPath = Join-Path -Path $RootPath -ChildPath "update_config.json"
-        if (Test-Path $updateConfigPath) {
-            Copy-Item -Path $updateConfigPath -Destination $backupDir -Force
-        }
 
-        # Copier les nouveaux fichiers (sauf Clients/ et Logs/)
-        $itemsToCopy = Get-ChildItem -Path $sourceDir -Exclude "Clients", "Logs"
-        foreach ($item in $itemsToCopy) {
-            $destPath = Join-Path -Path $RootPath -ChildPath $item.Name
-            if ($item.PSIsContainer) {
-                Copy-Item -Path $item.FullName -Destination $destPath -Recurse -Force
+        # --- Étape 3 : Générer le script de copie dans %TEMP% ---
+        # Ce script sera exécuté avec ou sans élévation selon le contexte.
+        $applyScript = @"
+# Script de copie généré automatiquement par M365 Monster Update
+# Exécuté avec droits admin si installation dans Program Files
+
+`$sourceDir        = '$($sourceDir -replace "'","''")'
+`$rootPath         = '$($RootPath -replace "'","''")'
+`$backupDir        = '$($backupDir -replace "'","''")'
+`$clientsDir       = '$($clientsDir -replace "'","''")'
+`$updateConfigPath = '$($updateConfigPath -replace "'","''")'
+`$stampFile        = '$($stampFile -replace "'","''")'
+
+try {
+    # Sauvegarde des fichiers client
+    New-Item -Path `$backupDir -ItemType Directory -Force | Out-Null
+    if (Test-Path `$clientsDir) {
+        Copy-Item -Path `$clientsDir -Destination `$backupDir -Recurse -Force
+    }
+    if (Test-Path `$updateConfigPath) {
+        Copy-Item -Path `$updateConfigPath -Destination `$backupDir -Force
+    }
+
+    # Copie des nouveaux fichiers (Clients/ et Logs/ exclus)
+    Get-ChildItem -Path `$sourceDir -Exclude 'Clients','Logs' | ForEach-Object {
+        `$dest = Join-Path -Path `$rootPath -ChildPath `$_.Name
+        if (`$_.PSIsContainer) {
+            Copy-Item -Path `$_.FullName -Destination `$dest -Recurse -Force
+        }
+        else {
+            Copy-Item -Path `$_.FullName -Destination `$dest -Force
+        }
+    }
+
+    # Restauration des fichiers client
+    `$backupClients = Join-Path -Path `$backupDir -ChildPath 'Clients'
+    if (Test-Path `$backupClients) {
+        Copy-Item -Path "`$backupClients\*" -Destination `$clientsDir -Force -ErrorAction SilentlyContinue
+    }
+    `$backupConfig = Join-Path -Path `$backupDir -ChildPath 'update_config.json'
+    if (Test-Path `$backupConfig) {
+        Copy-Item -Path `$backupConfig -Destination `$rootPath -Force
+    }
+
+    # Débloquer les fichiers téléchargés
+    Get-ChildItem -Path `$rootPath -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
+
+    # Écrire le fichier de confirmation
+    'OK' | Out-File -FilePath `$stampFile -Encoding UTF8 -Force
+}
+catch {
+    `$_.Exception.Message | Out-File -FilePath `$stampFile -Encoding UTF8 -Force
+}
+"@
+        $applyScript | Out-File -FilePath $tempScript -Encoding UTF8 -Force
+
+        # --- Étape 4 : Exécution du script de copie ---
+        # Détecter si une élévation est nécessaire :
+        # Program Files nécessite des droits admin ; un chemin custom (AppData, Bureau…) non.
+        $needsElevation = ($RootPath -like "*Program Files*") -and (-not (Test-AdminRights))
+
+        if ($needsElevation) {
+            # Informer l'utilisateur qu'une demande UAC va apparaître
+            [System.Windows.Forms.MessageBox]::Show(
+                "Les fichiers sont dans Program Files.`n`nWindows va demander une confirmation administrateur (UAC) pour copier les fichiers mis à jour.`n`nCliquez Oui dans la fenêtre qui va apparaître.",
+                "Autorisation requise",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
+
+            # Relance avec élévation — déclenche le prompt UAC standard Windows
+            $pwsh = if (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell" }
+            $proc = Start-Process $pwsh `
+                -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$tempScript`"" `
+                -Verb RunAs `
+                -Wait `
+                -PassThru
+
+            if ($proc.ExitCode -ne 0) {
+                throw "Le script d'élévation s'est terminé avec le code $($proc.ExitCode). L'utilisateur a peut-être refusé l'UAC."
             }
-            else {
-                Copy-Item -Path $item.FullName -Destination $destPath -Force
-            }
+        }
+        else {
+            # Déjà admin ou chemin non protégé — exécution directe
+            $pwsh = if (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell" }
+            Start-Process $pwsh `
+                -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$tempScript`"" `
+                -Wait `
+                -WindowStyle Hidden
         }
 
-        # Restaurer les fichiers client depuis la sauvegarde
-        $backupClients = Join-Path -Path $backupDir -ChildPath "Clients"
-        if (Test-Path $backupClients) {
-            Copy-Item -Path "$backupClients\*" -Destination $clientsDir -Force -ErrorAction SilentlyContinue
+        # --- Étape 5 : Vérifier que la copie a réussi ---
+        if (-not (Test-Path $stampFile)) {
+            throw "Fichier de confirmation absent. La copie n'a peut-être pas abouti."
+        }
+        $stampContent = Get-Content $stampFile -Raw -ErrorAction SilentlyContinue
+        if ($stampContent.Trim() -ne "OK") {
+            throw "Erreur pendant la copie : $stampContent"
         }
 
-        $backupUpdateConfig = Join-Path -Path $backupDir -ChildPath "update_config.json"
-        if (Test-Path $backupUpdateConfig) {
-            Copy-Item -Path $backupUpdateConfig -Destination $RootPath -Force
+        # Nettoyage
+        @($tempExtract, $tempScript, $stampFile) | ForEach-Object {
+            Remove-Item $_ -Recurse -Force -ErrorAction SilentlyContinue
         }
-
-        # Débloquer les nouveaux fichiers
-        Get-ChildItem -Path $RootPath -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
-
-        # Nettoyage temp
-        Remove-Item $tempZip -Force -ErrorAction SilentlyContinue
-        Remove-Item $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
 
         [System.Windows.Forms.MessageBox]::Show(
             "Mise à jour vers la version $($updateInfo.RemoteVersion) réussie !`n`nL'application va redémarrer.",
@@ -310,8 +399,9 @@ function Invoke-AutoUpdate {
         ) | Out-Null
 
         # Nettoyage en cas d'erreur
-        Remove-Item $tempZip -Force -ErrorAction SilentlyContinue
-        Remove-Item $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
+        @($tempZip, $tempExtract, $tempScript, $stampFile) | ForEach-Object {
+            Remove-Item $_ -Recurse -Force -ErrorAction SilentlyContinue
+        }
 
         return $false
     }
