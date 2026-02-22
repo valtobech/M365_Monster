@@ -3,5 +3,5 @@
   "branch": "main",
   "github_token": "",
   "download_url": "",
-  "check_interval_hours": 24
+  "check_interval_hours": 0
 }

@@ -280,16 +280,9 @@ Write-Host ""
 # ================================================================
 Write-Host "  [4/5] Configuration de la mise a jour automatique..." -ForegroundColor White
 
-$updateConfig = [ordered]@{
-    github_repo          = "valtobech/M365_Monster"
-    branch               = "main"
-    github_token         = ""
-    download_url         = ""
-    check_interval_hours = 0
-}
-
-$updateConfigPath = Join-Path -Path $InstallPath -ChildPath "update_config.json"
-$updateConfig | ConvertTo-Json -Depth 3 | Out-File -FilePath $updateConfigPath -Encoding UTF8 -Force
+$exampleConfig = Join-Path -Path $sourcePath -ChildPath "update_config.example.json"
+$destConfig    = Join-Path -Path $InstallPath -ChildPath "update_config.json"
+Copy-Item -Path $exampleConfig -Destination $destConfig -Force
 Write-Host "        Auto-update activé (vérification à chaque lancement)." -ForegroundColor Green
 
 # ================================================================
