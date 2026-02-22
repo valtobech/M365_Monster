@@ -1,6 +1,6 @@
 {
-  "version": "1.0.0",
-  "release_date": "2026-02-21",
-  "minimum_ps_version": "5.1",
-  "release_notes": "Version initiale de M365 Monster"
+  "version": "0.1.0",
+  "release_date": "2026-02-22",
+  "minimum_ps_version": "7.0",
+  "release_notes": "Version bêta initiale de M365 Monster"
 }
