@@ -3,11 +3,11 @@
 ## Prérequis
 
 - **Windows 10/11** ou Windows Server 2019+
-- **PowerShell 7+** (recommandé) — [Installer PowerShell 7](https://learn.microsoft.com/fr-fr/powershell/scripting/install/installing-powershell-on-windows)
+- **PowerShell 7+** — [Installer PowerShell 7](https://learn.microsoft.com/fr-fr/powershell/scripting/install/installing-powershell-on-windows)
 - Module **Microsoft.Graph** (installé automatiquement par l'installeur)
 - Droits **administrateur local** pour l'installation
 
-> ⚠️ PowerShell 5.1 (Windows PowerShell) n'est pas recommandé. Le SDK Microsoft.Graph 2.34+ utilise le WAM (Web Account Manager) qui nécessite PowerShell 7 pour un fonctionnement optimal. L'installeur détecte et configure automatiquement PowerShell 7 si présent.
+> ⚠️ PowerShell 7 est requis. Le SDK Microsoft.Graph 2.34+ utilise le WAM (Web Account Manager) qui nécessite PowerShell 7 pour un fonctionnement optimal. L'installeur détecte et configure automatiquement PowerShell 7 si présent.
 
 ---
 
@@ -40,7 +40,7 @@ Télécharger la dernière release depuis GitHub, extraire le .zip, puis :
 
 ```powershell
 # PowerShell en tant qu'administrateur
-cd "C:\chemin\vers\dossier\extrait"
+cd "C:\chemin\vers\dossier\extrait\M365Monster"
 .\Install.ps1
 ```
 
@@ -49,15 +49,15 @@ L'installateur :
 - Copie les fichiers vers `C:\Program Files\M365Monster`
 - Détecte PowerShell 7 (`pwsh.exe`) et configure les raccourcis en conséquence
 - Crée un raccourci Bureau + Menu Démarrer (avec icône)
-- Propose de configurer l'auto-update GitHub
+- Configure l'auto-update automatiquement (aucune intervention requise)
 
 ### Options
 
 ```powershell
 .\Install.ps1 -InstallPath "D:\Outils\M365Monster"    # Chemin custom
-.\Install.ps1 -SkipModules                              # Sans install modules
-.\Install.ps1 -SkipShortcuts                             # Sans raccourcis
-.\Install.ps1 -SkipUpdateConfig                          # Sans config auto-update
+.\Install.ps1 -SkipModules                              # Sans install modules PS
+.\Install.ps1 -SkipShortcuts                            # Sans raccourcis
+.\Install.ps1 -SkipUpdateConfig                         # Sans config auto-update
 ```
 
 ### Structure installée
@@ -66,7 +66,7 @@ L'installateur :
 C:\Program Files\M365Monster\
 ├── Main.ps1                    # Point d'entrée
 ├── version.json                # Version courante
-├── update_config.json          # Config auto-update
+├── update_config.json          # Config auto-update (créé par l'installeur)
 ├── Uninstall.ps1               # Désinstallateur
 ├── Core/                       # Modules fonctionnels
 │   ├── Config.ps1
@@ -92,11 +92,12 @@ C:\Program Files\M365Monster\
 
 ### Données utilisateur
 
-Les logs et préférences sont stockés dans `%APPDATA%\M365Monster\` (et non dans Program Files) pour éviter les problèmes de permissions :
+Les logs, préférences et données de cache sont stockés dans `%APPDATA%\M365Monster\` (et non dans Program Files) pour éviter les problèmes de permissions :
 
 ```
 %APPDATA%\M365Monster\
 ├── settings.json               # Langue choisie
+├── .last_update_check          # Horodatage dernière vérification MAJ
 └── Logs/
     └── session_YYYY-MM-DD_HH-mm.log
 ```
@@ -151,20 +152,24 @@ Double-cliquer **M365 Monster** sur le Bureau.
 
 ## 5. Auto-update
 
-Éditer `update_config.json` dans le dossier d'installation :
+L'auto-update est activé par défaut à l'installation. M365 Monster vérifie automatiquement les mises à jour à **chaque lancement**.
+
+La configuration se trouve dans `C:\Program Files\M365Monster\update_config.json` :
 
 ```json
 {
-  "github_repo": "votre-org/M365Monster",
+  "github_repo": "valtobech/M365_Monster",
   "branch": "main",
   "github_token": "",
-  "check_interval_hours": 24
+  "download_url": "",
+  "check_interval_hours": 0
 }
 ```
 
-Pour publier une mise à jour :
-1. Mettre à jour `version.json` dans le repo
-2. Créer une Release GitHub avec `M365Monster.zip` en asset
+- `check_interval_hours: 0` = vérification à chaque lancement (défaut)
+- `check_interval_hours: 24` = vérification toutes les 24h
+- `github_token` = uniquement nécessaire pour un repo privé
+- `download_url` = laisser vide pour utiliser GitHub Releases automatiquement
 
 Les éléments suivants sont **préservés** lors des mises à jour :
 - `Clients/` (configurations client)
@@ -193,7 +198,8 @@ Le désinstallateur :
 | Problème | Cause | Solution |
 |---|---|---|
 | `AADSTS50011` redirect URI mismatch | Redirect URI WAM manquant | Ajouter `ms-appx-web://Microsoft.AAD.BrokerPlugin/<client-id>` dans App Registration → Authentication |
-| Erreur d'accès en écriture dans Program Files | Logs écrits dans le dossier d'installation | Mettre à jour vers la dernière version (logs dans AppData) |
-| Le raccourci lance PowerShell 5.1 | Installeur ancien sans détection PS7 | Réinstaller avec le nouvel Install.ps1 |
+| Erreur d'accès en écriture dans Program Files | Ancienne version (logs dans dossier d'install) | Mettre à jour vers la dernière version (logs dans AppData) |
+| Le raccourci lance PowerShell 5.1 | PowerShell 7 non installé au moment de l'installation | Installer PS7 puis réinstaller M365 Monster |
 | `InteractiveBrowserCredential failed` | "Allow public client flows" désactivé | App Registration → Authentication → Allow public client flows → **Yes** |
 | Langue non proposée au démarrage | `settings.json` existe déjà | Supprimer `%APPDATA%\M365Monster\settings.json` |
+| Mise à jour non détectée | Throttling actif | Supprimer `%APPDATA%\M365Monster\.last_update_check` |

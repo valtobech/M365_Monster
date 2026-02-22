@@ -1,6 +1,6 @@
 # Référence Projet — M365 Monster
 
-> **Version :** 2.0
+> **Version :** 2.1
 > **Date :** 2026-02-22
 > **Portée :** Gestion du cycle de vie employé dans Microsoft 365 / Entra ID, avec interface graphique WinForms, multi-client, multi-langue.
 
@@ -18,7 +18,7 @@ L'outil est **agnostique au client** : un même set de scripts sert n'importe qu
 
 | Composant | Technologie |
 |---|---|
-| Langage | PowerShell 7+ (recommandé), compatible 5.1 |
+| Langage | PowerShell 7+ |
 | GUI | Windows Forms (WinForms) via `[System.Windows.Forms]` |
 | Annuaire | Microsoft Entra ID via **Microsoft Graph API** |
 | Authentification | MSAL interactive_browser via SDK Graph (WAM depuis 2.34+) |
@@ -40,7 +40,7 @@ L'outil est **agnostique au client** : un même set de scripts sert n'importe qu
 ├── Install.ps1                     # Installateur
 ├── Uninstall.ps1                   # Désinstallateur (self-relocate vers temp)
 ├── version.json                    # Version courante (pour auto-update)
-├── update_config.json              # Configuration GitHub auto-update
+├── update_config.example.json      # Modèle de config auto-update (versionné)
 │
 ├── 📁 Core/
 │   ├── Config.ps1                  # Chargement et validation du JSON client
@@ -72,11 +72,15 @@ L'outil est **agnostique au client** : un même set de scripts sert n'importe qu
     └── M365Monster.ico             # Icône de l'application
 ```
 
+> **Note :** `update_config.json` est exclu du versioning (`.gitignore`).
+> Il est créé automatiquement par `Install.ps1` à partir de `update_config.example.json`.
+
 ### Données utilisateur (hors Program Files)
 
 ```
 %APPDATA%\M365Monster/
 ├── settings.json                   # Langue choisie
+├── .last_update_check              # Horodatage de la dernière vérification MAJ
 └── Logs/
     └── session_YYYY-MM-DD_HH-mm.log
 ```
@@ -132,10 +136,27 @@ L'outil est **agnostique au client** : un même set de scripts sert n'importe qu
 
 ### Fonctionnement
 
-1. `Main.ps1` appelle `Invoke-AutoUpdate` au démarrage
-2. Vérifie `update_config.json` (repo, branche, token, intervalle)
-3. Compare `version.json` local vs distant (GitHub)
-4. Si nouvelle version : propose le téléchargement, extrait le .zip, redémarre
+1. `Main.ps1` appelle `Invoke-AutoUpdate` à chaque démarrage
+2. Lit `update_config.json` (repo, branche, token, intervalle)
+3. Compare `version.json` local vs `version.json` distant sur GitHub (raw)
+4. Si nouvelle version disponible : popup de proposition → téléchargement du `.zip` → extraction → remplacement des fichiers → redémarrage
+
+### Configuration (`update_config.json`)
+
+```json
+{
+  "github_repo": "valtobech/M365_Monster",
+  "branch": "main",
+  "github_token": "",
+  "download_url": "",
+  "check_interval_hours": 0
+}
+```
+
+- `check_interval_hours: 0` = vérification à chaque lancement
+- `check_interval_hours: 24` = vérification toutes les 24h
+- `github_token` = uniquement pour repo privé
+- `download_url` = laisser vide pour utiliser GitHub Releases automatiquement
 
 ### Éléments préservés lors des mises à jour
 
@@ -144,6 +165,10 @@ L'outil est **agnostique au client** : un même set de scripts sert n'importe qu
 - `settings.json` (dans AppData)
 - `Logs/` (dans AppData)
 
+### Publier une nouvelle version
+
+Voir `docs/RELEASE_PROCESS.md`.
+
 ---
 
 ## 7. Installation et désinstallation
@@ -151,10 +176,20 @@ L'outil est **agnostique au client** : un même set de scripts sert n'importe qu
 ### Install.ps1
 
 - Détecte `pwsh.exe` (PS7) en priorité pour les raccourcis
-- Copie : `Main.ps1`, `version.json`, `update_config.json`, `Core/`, `Modules/`, `Scripts/`, `Assets/`, `Lang/`
+- Copie : `Main.ps1`, `version.json`, `Core/`, `Modules/`, `Scripts/`, `Assets/`, `Lang/`
 - Crée `Clients/` avec `_Template.json` uniquement
+- Crée `update_config.json` automatiquement depuis `update_config.example.json`
 - Raccourcis Bureau + Menu Démarrer avec icône
-- Configuration interactive de l'auto-update GitHub
+- Auto-update activé par défaut, aucune intervention requise
+
+#### Options
+
+```powershell
+.\Install.ps1 -InstallPath "D:\Outils\M365Monster"    # Chemin custom
+.\Install.ps1 -SkipModules                              # Sans install modules PS
+.\Install.ps1 -SkipShortcuts                            # Sans raccourcis
+.\Install.ps1 -SkipUpdateConfig                         # Sans config auto-update
+```
 
 ### Uninstall.ps1
 
@@ -176,7 +211,7 @@ L'outil est **agnostique au client** : un même set de scripts sert n'importe qu
 | Gestion d'erreur | `try/catch` + `Write-Log` sur chaque appel Graph |
 | Sécurité | Jamais de mot de passe en clair dans les logs ou fichiers |
 | Logs | Écrits dans `%APPDATA%\M365Monster\Logs` |
-| PowerShell | PS7 recommandé, détection auto dans Install/Main |
+| PowerShell | PS7 requis, détection auto dans Install/Main |
 
 ---
 
