@@ -24,6 +24,6 @@
 
 ## Prérequis
 - Windows 10/11
-- PowerShell 5.1+ (7+ recommandé)
+- PowerShell 7+ 
 - Module `Microsoft.Graph` (installé automatiquement)
 - Une App Registration Entra ID avec les permissions Graph déléguées
