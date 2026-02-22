@@ -109,8 +109,8 @@ function Test-UpdateAvailable {
         try {
             $lastCheckDate = [datetime]::Parse($lastCheck)
             $hoursElapsed  = ((Get-Date) - $lastCheckDate).TotalHours
-            $checkInterval = if ($updateConfig.check_interval_hours) { $updateConfig.check_interval_hours } else { 24 }
-            if ($hoursElapsed -lt $checkInterval) {
+            $checkInterval = [int]$updateConfig.check_interval_hours
+            if ($checkInterval -gt 0 -and $hoursElapsed -lt $checkInterval) {
                 return $null
             }
         }

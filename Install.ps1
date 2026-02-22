@@ -46,7 +46,7 @@ Write-Host ""
 Write-Host "  ╔══════════════════════════════════════════════════╗" -ForegroundColor Magenta
 Write-Host "  ║                                                  ║" -ForegroundColor Magenta
 Write-Host "  ║           M365 Monster — Installateur            ║" -ForegroundColor Magenta
-Write-Host "  ║           v1.0.0                                 ║" -ForegroundColor Magenta
+Write-Host "  ║           v0.1.0                                 ║" -ForegroundColor Magenta
 Write-Host "  ║                                                  ║" -ForegroundColor Magenta
 Write-Host "  ╚══════════════════════════════════════════════════╝" -ForegroundColor Magenta
 Write-Host ""
@@ -278,66 +278,19 @@ Write-Host ""
 # ================================================================
 # ETAPE 4 : Configuration de la mise a jour automatique
 # ================================================================
-if (-not $SkipUpdateConfig) {
-    Write-Host "  [4/5] Configuration de la mise a jour automatique" -ForegroundColor White
-    Write-Host ""
-    Write-Host "        M365 Monster peut verifier les mises a jour depuis GitHub" -ForegroundColor Gray
-    Write-Host "        a chaque lancement. Pour cela, indiquez votre repo." -ForegroundColor Gray
-    Write-Host ""
+Write-Host "  [4/5] Configuration de la mise a jour automatique..." -ForegroundColor White
 
-    $configureUpdate = Read-Host "        Configurer l'auto-update maintenant ? (O/N)"
-
-    if ($configureUpdate -match "^[oOyY]") {
-        Write-Host ""
-        Write-Host "        Format du repo : proprietaire/nom-du-repo" -ForegroundColor Gray
-        Write-Host "        Exemple : monorg/M365Monster" -ForegroundColor Gray
-        $githubRepo = Read-Host "        Repo GitHub"
-
-        $branch = Read-Host "        Branche (defaut: main)"
-        if ([string]::IsNullOrWhiteSpace($branch)) { $branch = "main" }
-
-        Write-Host ""
-        Write-Host "        Pour un repo prive, un Personal Access Token est necessaire." -ForegroundColor Gray
-        Write-Host "        Pour un repo public, laissez vide." -ForegroundColor Gray
-        $githubToken = Read-Host "        GitHub Token (ou vide)"
-
-        Write-Host ""
-        Write-Host "        URL de telechargement du .zip de mise a jour." -ForegroundColor Gray
-        Write-Host "        Defaut : GitHub Releases (latest/M365Monster.zip)" -ForegroundColor Gray
-        $downloadUrl = Read-Host "        URL du .zip (ou vide pour le defaut)"
-
-        $checkInterval = Read-Host "        Intervalle de verification en heures (defaut: 24)"
-        if ([string]::IsNullOrWhiteSpace($checkInterval)) { $checkInterval = "24" }
-
-        # Construire et ecrire le fichier
-        $updateConfig = [ordered]@{
-            github_repo          = $githubRepo
-            branch               = $branch
-            github_token         = $githubToken
-            download_url         = $downloadUrl
-            check_interval_hours = [int]$checkInterval
-        }
-
-        $updateConfigPath = Join-Path -Path $InstallPath -ChildPath "update_config.json"
-        $updateConfig | ConvertTo-Json -Depth 3 | Out-File -FilePath $updateConfigPath -Encoding UTF8 -Force
-
-        Write-Host ""
-        if (-not [string]::IsNullOrWhiteSpace($githubRepo)) {
-            Write-Host "        Auto-update configure pour : $githubRepo ($branch)" -ForegroundColor Green
-        }
-        else {
-            Write-Host "        Auto-update desactive (repo vide)." -ForegroundColor Yellow
-        }
-    }
-    else {
-        Write-Host "        Auto-update non configure. Vous pourrez editer" -ForegroundColor Yellow
-        Write-Host "        update_config.json dans le dossier d'installation." -ForegroundColor Yellow
-    }
+$updateConfig = [ordered]@{
+    github_repo          = "valtobech/M365_Monster"
+    branch               = "main"
+    github_token         = ""
+    download_url         = ""
+    check_interval_hours = 0
 }
-else {
-    Write-Host "  [4/5] Auto-update — ignore (-SkipUpdateConfig)." -ForegroundColor DarkGray
-}
-Write-Host ""
+
+$updateConfigPath = Join-Path -Path $InstallPath -ChildPath "update_config.json"
+$updateConfig | ConvertTo-Json -Depth 3 | Out-File -FilePath $updateConfigPath -Encoding UTF8 -Force
+Write-Host "        Auto-update activé (vérification à chaque lancement)." -ForegroundColor Green
 
 # ================================================================
 # ETAPE 5 : Resume
