@@ -1,9 +1,8 @@
 # M365 Monster
-
 > Outil PowerShell GUI pour la gestion du cycle de vie employé dans Microsoft 365 / Entra ID
 
 ![Version](https://img.shields.io/github/v/release/valtobech/M365_Monster)
-![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-blue)
+![PowerShell](https://img.shields.io/badge/PowerShell-7%2B-blue)
 
 ## Fonctionnalités
 - Onboarding / Offboarding / Modification d'employés
@@ -20,10 +19,10 @@
 ```
 
 👉 [Guide d'installation complet](INSTALLATION.md)
-👉 [Configuration Azure App Registration](docs/CONFIGURATION.md)
+👉 [Configuration Azure App Registration](CONFIGURATION.md)
 
 ## Prérequis
 - Windows 10/11
-- PowerShell 7+ 
+- PowerShell 7+
 - Module `Microsoft.Graph` (installé automatiquement)
 - Une App Registration Entra ID avec les permissions Graph déléguées
