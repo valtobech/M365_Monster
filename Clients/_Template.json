@@ -1,0 +1,40 @@
+{
+  "client_name": "Nom de l'organisation",
+  "tenant_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "client_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+
+  "auth_method": "interactive_browser",
+
+  "smtp_domain": "@domaine.com",
+
+  "license_groups": [
+    "LIC-Microsoft365-E3",
+    "LIC-Microsoft365-E5",
+    "LIC-Office365-F3"
+  ],
+
+  "membership_groups": [
+    "Tous-Employes",
+    "VPN-Access",
+    "Teams-General"
+  ],
+
+  "offboarding": {
+    "disabled_ou_group": "Comptes-Désactivés",
+    "mailbox_forward_to": "",
+    "revoke_licenses": true,
+    "remove_all_groups": true,
+    "retention_days": 30
+  },
+
+  "notifications": {
+    "enabled": false,
+    "recipients": []
+  },
+
+  "password_policy": {
+    "length": 14,
+    "force_change_at_login": true,
+    "include_special_chars": true
+  }
+}

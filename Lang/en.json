@@ -1,0 +1,151 @@
+{
+  "_language": "English",
+  "_code": "en",
+
+  "app": {
+    "name": "M365 Monster",
+    "version_label": "v1.0.0",
+    "footer": "M365 Monster v1.0.0 — Employee lifecycle management tool",
+    "ready": "Ready",
+    "domain_label": "Domain",
+    "loading": "Loading..."
+  },
+
+  "lang_selector": {
+    "title": "M365 Monster — Langue / Language",
+    "prompt": "Choisissez votre langue / Choose your language",
+    "btn_confirm": "Confirmer / Confirm"
+  },
+
+  "client_selector": {
+    "title": "M365 Monster — Client selection",
+    "heading": "Select the client to manage",
+    "description": "Client configurations are loaded from the Clients/ folder.",
+    "btn_connect": "Connect",
+    "btn_quit": "Quit",
+    "btn_new_client": "⚙ New client / Settings",
+    "no_client_title": "No client found",
+    "no_client_msg": "No client configuration file found in the Clients/ folder.\n\nPlease copy _Template.json and configure it for your client."
+  },
+
+  "main_menu": {
+    "client_label": "Client",
+    "tenant_label": "Tenant",
+    "connected": "● Connected to Graph",
+    "disconnected": "● Disconnected",
+    "btn_change_client": "Change client",
+    "change_client_title": "Change client",
+    "change_client_msg": "Do you want to disconnect and change client?\n\nThe application will close. Relaunch M365 Monster to select another client.",
+
+    "tile_onboarding": "Onboarding",
+    "tile_onboarding_desc": "Create a new employee account",
+    "tile_offboarding": "Offboarding",
+    "tile_offboarding_desc": "Manage employee departure (disable, revoke)",
+    "tile_modification": "Modification",
+    "tile_modification_desc": "Modify an existing employee's attributes",
+    "tile_employee_type": "Employee Types",
+    "tile_employee_type_desc": "Manage Employee Types in Entra ID",
+    "tile_stale_devices": "Stale Devices",
+    "tile_stale_devices_desc": "Manage inactive devices in Entra",
+    "tile_settings": "Settings",
+    "tile_settings_desc": "Manage client configuration files",
+
+    "script_not_found_title": "Script not found",
+    "script_not_found_msg": "The following file was not found:\n\n{0}\n\nPlace your script in the Scripts\\ folder of the project."
+  },
+
+  "onboarding": {
+    "title": "Onboarding - New employee - {0}",
+
+    "section_identity": "IDENTITY",
+    "field_lastname": "Last name",
+    "field_firstname": "First name",
+    "field_email": "Email / Logon",
+    "btn_generate": "Generate",
+    "upn_checking": "Checking availability...",
+    "upn_available": "✓ {0} format(s) available — all verified unique",
+    "upn_none": "No variant generated.",
+    "upn_required": "Please fill in Last name and First name before generating the email.",
+    "upn_required_title": "Required fields",
+
+    "section_position": "POSITION",
+    "field_job_title": "Job title",
+    "field_department": "Department",
+    "field_employee_type": "Employee Type",
+    "field_employee_id": "Employee ID",
+    "field_manager": "Manager",
+    "btn_search": "Search",
+    "manager_min_chars": "Enter at least 2 characters.",
+    "manager_no_result": "No results.",
+    "manager_search_title": "Search",
+    "field_usage_location": "Usage Location",
+
+    "section_license": "LICENSE",
+    "field_license_group": "License pack",
+    "license_none": "(no license)",
+
+    "section_groups": "GROUP MEMBERSHIP",
+
+    "section_password": "PASSWORD",
+    "password_info": "A {0}-character password will be automatically generated and displayed only once after creation.",
+
+    "btn_create": "Create account",
+    "btn_cancel": "Cancel",
+    "creating": "Creating account...",
+
+    "validation_lastname": "Last name is required.",
+    "validation_firstname": "First name is required.",
+    "validation_email": "Please generate and select an email format.",
+    "validation_job_title": "Job title is required.",
+    "validation_department": "Department is required.",
+    "validation_employee_type": "Employee Type is required.",
+    "validation_usage_location": "Usage Location is required.",
+
+    "confirm_title": "Confirm onboarding",
+    "confirm_header": "Do you confirm the creation of the following account?",
+    "confirm_fullname": "Full name",
+    "confirm_upn": "UPN",
+    "confirm_title_field": "Title",
+    "confirm_department": "Department",
+    "confirm_employee_type": "Employee Type",
+    "confirm_usage_location": "Usage Location",
+    "confirm_employee_id": "Employee ID",
+    "confirm_manager": "Manager",
+    "confirm_license": "License (group)",
+    "confirm_groups": "Groups",
+
+    "result_partial_title": "Partial onboarding",
+    "result_partial_msg": "Account created with warnings:\n\n{0}",
+    "result_error_title": "Onboarding error",
+    "result_error_msg": "An error occurred:\n\n{0}",
+    "error_creation_failed": "Account creation failed: {0}"
+  },
+
+  "password_dialog": {
+    "title": "Generated credentials",
+    "warning": "⚠ These credentials will only be displayed once!",
+    "username_label": "Username:",
+    "password_label": "Password:",
+    "btn_copy": "📋 Copy to clipboard",
+    "copied_title": "Copied",
+    "copied_msg": "Credentials copied to clipboard.",
+    "btn_close": "Close",
+    "clipboard_user": "Username",
+    "clipboard_pass": "Password"
+  },
+
+  "confirm_dialog": {
+    "btn_yes": "Yes",
+    "btn_no": "No"
+  },
+
+  "update": {
+    "available_title": "Update available — M365 Monster",
+    "available_msg": "A new version of M365 Monster is available!\n\nCurrent version : {0}\nNew version     : {1}\nRelease date    : {2}\n\n{3}\n\nDo you want to update now?",
+    "notes_label": "Notes: {0}",
+    "success_title": "Update complete",
+    "success_msg": "Successfully updated to version {0}!\n\nThe application will restart.",
+    "error_title": "Update error",
+    "error_msg": "Error during update:\n{0}\n\nThe application will start with the current version."
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "_comment": "Configuration de la mise à jour automatique M365 Monster",
+  "_comment2": "Ce fichier est préservé lors des mises à jour.",
+
+  "github_repo": "",
+  "branch": "main",
+  "github_token": "",
+  "download_url": "",
+  "check_interval_hours": 24
+}

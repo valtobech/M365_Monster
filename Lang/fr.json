@@ -1,0 +1,151 @@
+{
+  "_language": "Français",
+  "_code": "fr",
+
+  "app": {
+    "name": "M365 Monster",
+    "version_label": "v1.0.0",
+    "footer": "M365 Monster v1.0.0 — Outil de gestion du cycle de vie employé",
+    "ready": "Prêt",
+    "domain_label": "Domaine",
+    "loading": "Chargement en cours..."
+  },
+
+  "lang_selector": {
+    "title": "M365 Monster — Langue / Language",
+    "prompt": "Choisissez votre langue / Choose your language",
+    "btn_confirm": "Confirmer / Confirm"
+  },
+
+  "client_selector": {
+    "title": "M365 Monster — Sélection du client",
+    "heading": "Sélectionnez le client à gérer",
+    "description": "Les configurations clients sont chargées depuis le dossier Clients/.",
+    "btn_connect": "Connecter",
+    "btn_quit": "Quitter",
+    "btn_new_client": "⚙ Nouveau client / Paramétrage",
+    "no_client_title": "Aucun client",
+    "no_client_msg": "Aucun fichier de configuration client trouvé dans le dossier Clients/.\n\nVeuillez copier _Template.json et le configurer pour votre client."
+  },
+
+  "main_menu": {
+    "client_label": "Client",
+    "tenant_label": "Tenant",
+    "connected": "● Connecté à Graph",
+    "disconnected": "● Déconnecté",
+    "btn_change_client": "Changer de client",
+    "change_client_title": "Changement de client",
+    "change_client_msg": "Voulez-vous vous déconnecter et changer de client ?\n\nL'application va se fermer. Relancez M365 Monster pour sélectionner un autre client.",
+
+    "tile_onboarding": "Onboarding",
+    "tile_onboarding_desc": "Créer un nouveau compte employé",
+    "tile_offboarding": "Offboarding",
+    "tile_offboarding_desc": "Gérer le départ d'un employé (désactivation, révocation)",
+    "tile_modification": "Modification",
+    "tile_modification_desc": "Modifier les attributs d'un employé existant",
+    "tile_employee_type": "Types d'employé",
+    "tile_employee_type_desc": "Gestion des Types d'employé dans Entra ID",
+    "tile_stale_devices": "Devices inactifs",
+    "tile_stale_devices_desc": "Gestion des devices inactifs Entra",
+    "tile_settings": "Paramétrage",
+    "tile_settings_desc": "Gérer les fichiers de configuration client",
+
+    "script_not_found_title": "Script introuvable",
+    "script_not_found_msg": "Le fichier suivant est introuvable :\n\n{0}\n\nPlacez votre script dans le dossier Scripts\\ du projet."
+  },
+
+  "onboarding": {
+    "title": "Onboarding - Nouvel employé - {0}",
+
+    "section_identity": "IDENTITÉ",
+    "field_lastname": "Nom",
+    "field_firstname": "Prénom",
+    "field_email": "Courriel / Logon",
+    "btn_generate": "Générer",
+    "upn_checking": "Vérification en cours...",
+    "upn_available": "✓ {0} format(s) disponible(s) — tous vérifiés uniques",
+    "upn_none": "Aucune variante générée.",
+    "upn_required": "Veuillez remplir le Nom et le Prénom avant de générer le courriel.",
+    "upn_required_title": "Champs requis",
+
+    "section_position": "POSTE",
+    "field_job_title": "Titre du poste",
+    "field_department": "Département",
+    "field_employee_type": "Employee Type",
+    "field_employee_id": "Matricule (Employee ID)",
+    "field_manager": "Gestionnaire",
+    "btn_search": "Chercher",
+    "manager_min_chars": "Saisissez au moins 2 caractères.",
+    "manager_no_result": "Aucun résultat.",
+    "manager_search_title": "Recherche",
+    "field_usage_location": "Usage Location",
+
+    "section_license": "LICENCE",
+    "field_license_group": "Pack de licence",
+    "license_none": "(aucune licence)",
+
+    "section_groups": "GROUPES D'APPARTENANCE",
+
+    "section_password": "MOT DE PASSE",
+    "password_info": "Un mot de passe de {0} caractères sera généré automatiquement et affiché une seule fois après la création.",
+
+    "btn_create": "Créer le compte",
+    "btn_cancel": "Annuler",
+    "creating": "Création du compte en cours...",
+
+    "validation_lastname": "Le Nom est obligatoire.",
+    "validation_firstname": "Le Prénom est obligatoire.",
+    "validation_email": "Veuillez générer et sélectionner un format de courriel.",
+    "validation_job_title": "Le Titre du poste est obligatoire.",
+    "validation_department": "Le Département est obligatoire.",
+    "validation_employee_type": "Le Employee Type est obligatoire.",
+    "validation_usage_location": "Le Usage Location est obligatoire.",
+
+    "confirm_title": "Confirmer l'onboarding",
+    "confirm_header": "Confirmez-vous la création du compte suivant ?",
+    "confirm_fullname": "Nom complet",
+    "confirm_upn": "UPN",
+    "confirm_title_field": "Titre",
+    "confirm_department": "Département",
+    "confirm_employee_type": "Employee Type",
+    "confirm_usage_location": "Usage Location",
+    "confirm_employee_id": "Matricule",
+    "confirm_manager": "Gestionnaire",
+    "confirm_license": "Licence (groupe)",
+    "confirm_groups": "Groupes",
+
+    "result_partial_title": "Onboarding partiel",
+    "result_partial_msg": "Compte créé avec des avertissements :\n\n{0}",
+    "result_error_title": "Erreur d'onboarding",
+    "result_error_msg": "Une erreur est survenue :\n\n{0}",
+    "error_creation_failed": "Échec de la création du compte : {0}"
+  },
+
+  "password_dialog": {
+    "title": "Identifiants générés",
+    "warning": "⚠ Ces identifiants ne seront affichés qu'une seule fois !",
+    "username_label": "Nom d'utilisateur :",
+    "password_label": "Mot de passe :",
+    "btn_copy": "📋 Copier dans le presse-papier",
+    "copied_title": "Copié",
+    "copied_msg": "Identifiants copiés dans le presse-papier.",
+    "btn_close": "Fermer",
+    "clipboard_user": "Utilisateur",
+    "clipboard_pass": "Mot de passe"
+  },
+
+  "confirm_dialog": {
+    "btn_yes": "Oui",
+    "btn_no": "Non"
+  },
+
+  "update": {
+    "available_title": "Mise à jour disponible — M365 Monster",
+    "available_msg": "Une nouvelle version de M365 Monster est disponible !\n\nVersion actuelle  : {0}\nNouvelle version  : {1}\nDate de sortie    : {2}\n\n{3}\n\nVoulez-vous mettre à jour maintenant ?",
+    "notes_label": "Notes : {0}",
+    "success_title": "Mise à jour terminée",
+    "success_msg": "Mise à jour vers la version {0} réussie !\n\nL'application va redémarrer.",
+    "error_title": "Erreur de mise à jour",
+    "error_msg": "Erreur lors de la mise à jour :\n{0}\n\nL'application va démarrer avec la version actuelle."
+  }
+}
