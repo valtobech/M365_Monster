@@ -1,0 +1,30 @@
+# ================================================================
+# M365 Monster — .gitignore
+# ================================================================
+
+# Configurations client (tenant IDs, données sensibles)
+# On exclut tout sauf le template
+Clients/*.json
+!Clients/_Template.json
+
+# Logs de session (données runtime, potentiellement PII)
+Logs/
+*.log
+
+# Config auto-update locale (propre à chaque installation)
+update_config.json
+
+# Préférences utilisateur runtime
+settings.json
+
+# Fichiers temporaires Windows
+Thumbs.db
+Desktop.ini
+*.tmp
+
+# Fichiers PowerShell compilés ou cache
+*.ps1xml
+
+# IDE / éditeur
+.vscode/
+.idea/
