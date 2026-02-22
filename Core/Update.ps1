@@ -100,12 +100,15 @@ function Test-UpdateAvailable {
     }
 
     # Vérifier le délai entre vérifications (éviter de spammer GitHub)
-    $lastCheckFile = Join-Path -Path $RootPath -ChildPath "Logs\.last_update_check"
+    # Fichier de throttling dans %APPDATA% (pas dans Program Files)
+    $appDataPath   = Join-Path -Path $env:APPDATA -ChildPath "M365Monster"
+    $lastCheckFile = Join-Path -Path $appDataPath -ChildPath ".last_update_check"
+
     if (Test-Path -Path $lastCheckFile) {
         $lastCheck = Get-Content -Path $lastCheckFile -Raw -ErrorAction SilentlyContinue
         try {
             $lastCheckDate = [datetime]::Parse($lastCheck)
-            $hoursElapsed = ((Get-Date) - $lastCheckDate).TotalHours
+            $hoursElapsed  = ((Get-Date) - $lastCheckDate).TotalHours
             $checkInterval = if ($updateConfig.check_interval_hours) { $updateConfig.check_interval_hours } else { 24 }
             if ($hoursElapsed -lt $checkInterval) {
                 return $null
@@ -135,8 +138,7 @@ function Test-UpdateAvailable {
         $response = Invoke-RestMethod -Uri $remoteVersionUrl -Headers $headers -TimeoutSec 10 -ErrorAction Stop
 
         # Enregistrer la date de vérification
-        $logFolder = Join-Path -Path $RootPath -ChildPath "Logs"
-        if (-not (Test-Path -Path $logFolder)) { New-Item -Path $logFolder -ItemType Directory -Force | Out-Null }
+        if (-not (Test-Path -Path $appDataPath)) { New-Item -Path $appDataPath -ItemType Directory -Force | Out-Null }
         (Get-Date).ToString("o") | Out-File -FilePath $lastCheckFile -Encoding UTF8 -Force
 
         # Comparer les versions
