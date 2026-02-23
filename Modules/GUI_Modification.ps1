@@ -241,7 +241,6 @@ function Show-ModificationForm {
     $pnlMain.Size       = New-Object System.Drawing.Size(810, 570)
     $pnlMain.Visible    = $false
     $pnlMain.Anchor     = ([System.Windows.Forms.AnchorStyles]::Top -bor `
-                           [System.Windows.Forms.AnchorStyles]::Bottom -bor `
                            [System.Windows.Forms.AnchorStyles]::Left -bor `
                            [System.Windows.Forms.AnchorStyles]::Right)
     $form.Controls.Add($pnlMain)
@@ -517,6 +516,14 @@ function Show-ModificationForm {
     $pnlFooter.Height    = 44
     $pnlFooter.BackColor = [System.Drawing.Color]::FromArgb(235, 237, 240)
     $form.Controls.Add($pnlFooter)
+
+    # Recalcul dynamique de la hauteur de pnlMain pour qu'il s'arrête toujours
+    # au-dessus du pnlFooter — nécessaire car Anchor::Bottom et Dock::Bottom entrent en conflit
+    $script:AjusterLayout = {
+        $pnlMain.Height = $form.ClientSize.Height - $pnlMain.Top - $pnlFooter.Height - 4
+    }
+    $form.Add_Shown({ & $script:AjusterLayout })
+    $form.Add_Resize({ & $script:AjusterLayout })
 
     $btnRefresh = New-Object System.Windows.Forms.Button
     $btnRefresh.Text      = Get-Text "modification.btn_refresh"

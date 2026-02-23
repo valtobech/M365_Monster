@@ -220,9 +220,145 @@ function Get-GraphConnectionStatus {
     }
 }
 
+function Test-ExchangeModule {
+    <#
+    .SYNOPSIS
+        Vérifie si le module ExchangeOnlineManagement est installé.
+        Propose l'installation si absent.
+
+    .OUTPUTS
+        [bool] — $true si le module est disponible, $false sinon.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $module = Get-Module -ListAvailable -Name "ExchangeOnlineManagement" -ErrorAction SilentlyContinue
+
+    if (-not $module) {
+        Write-Log -Level "WARNING" -Action "PREREQUIS" -Message "Module ExchangeOnlineManagement non trouvé."
+
+        $reponse = [System.Windows.Forms.MessageBox]::Show(
+            "Le module ExchangeOnlineManagement n'est pas installé.`nIl est requis pour gérer les alias email.`n`nVoulez-vous l'installer maintenant ?`n`n(Commande : Install-Module ExchangeOnlineManagement -Scope CurrentUser)",
+            "Module manquant",
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        )
+
+        if ($reponse -eq [System.Windows.Forms.DialogResult]::Yes) {
+            try {
+                Write-Log -Level "INFO" -Action "INSTALL" -Message "Installation du module ExchangeOnlineManagement en cours..."
+                Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force -AllowClobber
+                Write-Log -Level "SUCCESS" -Action "INSTALL" -Message "Module ExchangeOnlineManagement installé avec succès."
+                return $true
+            }
+            catch {
+                Write-Log -Level "ERROR" -Action "INSTALL" -Message "Échec de l'installation EXO : $($_.Exception.Message)"
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Échec de l'installation du module ExchangeOnlineManagement.`n$($_.Exception.Message)`n`nLa gestion des alias email sera indisponible.",
+                    "Erreur",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Error
+                )
+                return $false
+            }
+        }
+        else {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Connect-ExchangeOnlineSession {
+    <#
+    .SYNOPSIS
+        Établit la connexion à Exchange Online pour la gestion des alias email.
+        Utilise le même UPN que la session Graph active (connexion unifiée).
+
+    .OUTPUTS
+        [PSCustomObject] — {Success: bool, Error: string}
+    #>
+    [CmdletBinding()]
+    param()
+
+    # Vérification du module
+    if (-not (Test-ExchangeModule)) {
+        return [PSCustomObject]@{ Success = $false; Error = "Module ExchangeOnlineManagement non disponible." }
+    }
+
+    # Vérifier si déjà connecté
+    try {
+        $exoConn = Get-ConnectionInformation -ErrorAction SilentlyContinue
+        if ($exoConn -and $exoConn.State -eq "Connected") {
+            Write-Log -Level "INFO" -Action "CONNEXION_EXO" -Message "Session Exchange Online déjà active."
+            return [PSCustomObject]@{ Success = $true; Error = $null }
+        }
+    }
+    catch { }
+
+    try {
+        Write-Log -Level "INFO" -Action "CONNEXION_EXO" -Message "Connexion Exchange Online en cours..."
+
+        # Connexion interactive — même compte que Graph
+        # -ShowBanner:$false supprime le bandeau de bienvenue dans la console
+        Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+
+        Write-Log -Level "SUCCESS" -Action "CONNEXION_EXO" -Message "Connexion Exchange Online réussie."
+        return [PSCustomObject]@{ Success = $true; Error = $null }
+    }
+    catch {
+        $errMsg = $_.Exception.Message
+        Write-Log -Level "ERROR" -Action "CONNEXION_EXO" -Message "Échec connexion Exchange Online : $errMsg"
+        return [PSCustomObject]@{ Success = $false; Error = $errMsg }
+    }
+}
+
+function Disconnect-ExchangeOnlineSession {
+    <#
+    .SYNOPSIS
+        Déconnecte la session Exchange Online active.
+
+    .OUTPUTS
+        [void]
+    #>
+    [CmdletBinding()]
+    param()
+
+    try {
+        Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue
+        Write-Log -Level "INFO" -Action "DECONNEXION_EXO" -Message "Session Exchange Online déconnectée."
+    }
+    catch {
+        Write-Log -Level "WARNING" -Action "DECONNEXION_EXO" -Message "Erreur déconnexion EXO : $($_.Exception.Message)"
+    }
+}
+
+function Get-ExchangeConnectionStatus {
+    <#
+    .SYNOPSIS
+        Retourne l'état de la connexion Exchange Online.
+
+    .OUTPUTS
+        [bool] — $true si connecté, $false sinon.
+    #>
+    [CmdletBinding()]
+    param()
+
+    try {
+        $conn = Get-ConnectionInformation -ErrorAction SilentlyContinue
+        return ($null -ne $conn -and $conn.State -eq "Connected")
+    }
+    catch {
+        return $false
+    }
+}
+
 # Point d'attention :
 # - interactive_browser est la méthode RECOMMANDÉE : popup navigateur, zéro secret, MFA compatible
 # - device_code est conservé mais souvent bloqué chez les clients (Conditional Access)
 # - client_secret est conservé pour les cas d'automatisation isolés — secret en clair dans le JSON
 # - Les scopes sont définis en dur car ils correspondent aux permissions requises par l'outil
 # - -NoWelcome supprime le message "Welcome to Microsoft Graph!" dans la console
+# - Exchange Online est nécessaire pour Set-Mailbox (alias email) — proxyAddresses est read-only via Graph
+#   sur les boîtes Exchange Online. Connect-ExchangeOnlineSession est appelé depuis Main.ps1 après Graph.

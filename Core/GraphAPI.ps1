@@ -48,16 +48,22 @@ function Get-AzUser {
 function Search-AzUsers {
     <#
     .SYNOPSIS
-        Recherche des utilisateurs Azure AD par nom (startsWith sur displayName).
+        Recherche des utilisateurs Azure AD par prénom, nom, displayName ou adresse mail.
 
     .PARAMETER SearchTerm
-        Terme de recherche (début du displayName).
+        Terme de recherche — recherche partielle (contains) sur displayName, givenName, surname et mail.
+        Exemples : "Martin", "ferrand", "kevin", "kevin.ferrand@domaine.com"
 
     .PARAMETER MaxResults
         Nombre maximum de résultats (défaut : 20).
 
     .OUTPUTS
         [PSCustomObject] — {Success: bool, Data: array, Error: string}
+
+    .NOTES
+        Utilise $search (OData) avec ConsistencyLevel: eventual — permet la recherche partielle
+        sur plusieurs champs simultanément, contrairement à startsWith qui exige le début exact.
+        Syntaxe : "displayName:terme" OR "givenName:terme" OR "surname:terme" OR "mail:terme"
     #>
     [CmdletBinding()]
     param(
@@ -70,10 +76,18 @@ function Search-AzUsers {
     try {
         Write-Log -Level "INFO" -Action "SEARCH_USERS" -Message "Recherche d'utilisateurs : '$SearchTerm'"
 
-        # CHOIX: Recherche sur displayName et userPrincipalName avec ConsistencyLevel eventual
-        # Recherche sur displayName, UPN et mail (pour trouver par alias type "adupontel")
-        $filter = "startsWith(displayName,'$SearchTerm') or startsWith(userPrincipalName,'$SearchTerm') or startsWith(mail,'$SearchTerm')"
-        $users = Get-MgUser -Filter $filter -Top $MaxResults -Property "id,displayName,userPrincipalName,department,jobTitle,accountEnabled,mail" -ConsistencyLevel "eventual" -CountVariable countVar -ErrorAction Stop
+        # $search avec ConsistencyLevel eventual — recherche partielle (contains) sur plusieurs champs
+        # Couvre : "Martin" → trouve "Kevin Martin", "Martinez", "martin@..."
+        # Couvre : "kevin" → trouve "Kevin Ferrand", "Kevin Martin"
+        # Couvre : "ferrand" → trouve "Kevin Ferrand" même si displayName commence par "Kevin"
+        $searchQuery = "`"displayName:$SearchTerm`" OR `"givenName:$SearchTerm`" OR `"surname:$SearchTerm`" OR `"mail:$SearchTerm`""
+        $users = Get-MgUser `
+            -Search $searchQuery `
+            -Top $MaxResults `
+            -Property "id,displayName,userPrincipalName,department,jobTitle,accountEnabled,mail,givenName,surname" `
+            -ConsistencyLevel "eventual" `
+            -CountVariable countVar `
+            -ErrorAction Stop
 
         return [PSCustomObject]@{ Success = $true; Data = $users; Error = $null }
     }

@@ -6,6 +6,43 @@ Versioning selon [Semantic Versioning](https://semver.org/lang/fr/).
 
 ---
 
+## [0.1.3] — 2026-02-22
+
+### Corrigé
+
+**Alias email — remplacement de Graph PATCH par Exchange Online (`Set-Mailbox`)**
+
+- **Cause racine** : `proxyAddresses` est **read-only via Graph API** sur les boîtes Exchange Online (`400 Bad Request — Property 'proxyAddresses' is read-only`). Ni `Update-MgUser`, ni `Invoke-MgGraphRequest PATCH` ne fonctionnent sur ces boîtes.
+- **Solution** : passage à `Set-Mailbox -EmailAddresses @{Add=...}` / `@{Remove=...}` via le module `ExchangeOnlineManagement`, qui est la méthode correcte et documentée par Microsoft.
+- `Show-ManageAliases` (`GUI_Modification.ps1`) : lecture via `Get-Mailbox` + écriture via `Set-Mailbox`. Vérification de la connexion EXO à l'ouverture du formulaire, avec proposition de reconnexion si inactive.
+- `Show-ModifyUPN` (`GUI_Modification.ps1`) : l'ajout de l'ancien UPN comme alias post-changement UPN utilise désormais `Set-Mailbox` à la place du PATCH Graph.
+
+### Ajouté
+
+**Module `Core/Connect.ps1` — nouvelles fonctions Exchange Online**
+
+- `Test-ExchangeModule` : vérifie la présence du module `ExchangeOnlineManagement`, propose l'installation si absent (même pattern que `Test-GraphModule`).
+- `Connect-ExchangeOnlineSession` : connexion interactive EXO, vérifie si déjà connecté via `Get-ConnectionInformation`.
+- `Disconnect-ExchangeOnlineSession` : déconnexion propre (`Disconnect-ExchangeOnline -Confirm:$false`).
+- `Get-ExchangeConnectionStatus` : retourne `[bool]` selon l'état de `Get-ConnectionInformation`.
+
+**`Main.ps1` — connexion EXO au démarrage**
+
+- Appel de `Connect-ExchangeOnlineSession` après la connexion Graph.
+- Non bloquant : si EXO échoue, un avertissement est affiché mais l'outil reste fonctionnel (alias email désactivés uniquement).
+- Appel de `Disconnect-ExchangeOnlineSession` à la fermeture.
+
+**`Install.ps1` — nouveau prérequis**
+
+- `ExchangeOnlineManagement` ajouté dans `$requiredModules` — installé automatiquement avec `Microsoft.Graph` lors de l'installation.
+
+### Mis à jour
+
+- `REFERENCE.md` : stack technique, flux d'exécution, section permissions (Graph + EXO), notes sur les alias.
+- `INSTALLATION.md` : prérequis, description installateur, permissions Azure, étape d'authentification, tableau de dépannage — tout mis à jour pour refléter la double connexion Graph + Exchange Online.
+
+---
+
 ## [0.1.2] — 2026-02-22
 
 ### Corrigé

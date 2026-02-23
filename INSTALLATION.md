@@ -5,6 +5,7 @@
 - **Windows 10/11** ou Windows Server 2019+
 - **PowerShell 7+** — [Installer PowerShell 7](https://learn.microsoft.com/fr-fr/powershell/scripting/install/installing-powershell-on-windows)
 - Module **Microsoft.Graph** (installé automatiquement par l'installeur)
+- Module **ExchangeOnlineManagement** (installé automatiquement par l'installeur — requis pour la gestion des alias email)
 - Droits **administrateur local** pour l'installation
 
 > ⚠️ PowerShell 7 est requis. Le SDK Microsoft.Graph 2.34+ utilise le WAM (Web Account Manager) qui nécessite PowerShell 7 pour un fonctionnement optimal. L'installeur détecte et configure automatiquement PowerShell 7 si présent.
@@ -31,6 +32,10 @@
    - `Group.ReadWrite.All`
    - `Directory.ReadWrite.All`
    - `Mail.Send` (si notifications)
+   - `UserAuthenticationMethod.ReadWrite.All` (reset MFA)
+   - `AuditLog.Read.All` (journaux de connexion)
+
+5. **Permissions Exchange Online** — le compte connecté doit avoir le rôle **Exchange Administrator** ou **Recipient Management** sur le tenant pour pouvoir exécuter `Set-Mailbox` (gestion des alias email).
 
 ---
 
@@ -45,7 +50,7 @@ cd "C:\chemin\vers\dossier\extrait\M365Monster"
 ```
 
 L'installateur :
-- Installe le module `Microsoft.Graph` si absent
+- Installe les modules `Microsoft.Graph` et `ExchangeOnlineManagement` si absents
 - Copie les fichiers vers `C:\Program Files\M365Monster`
 - Détecte PowerShell 7 (`pwsh.exe`) et configure les raccourcis en conséquence
 - Crée un raccourci Bureau + Menu Démarrer (avec icône)
@@ -139,7 +144,9 @@ Double-cliquer **M365 Monster** sur le Bureau.
 
 1. **Premier lancement** : choisir la langue (FR/EN)
 2. Sélectionner le client dans la liste (ou en créer un nouveau)
-3. S'authentifier via le navigateur (MFA supporté)
+3. S'authentifier via le navigateur (MFA supporté) — **deux authentifications successives** :
+   - Microsoft Graph (Entra ID) — popup navigateur
+   - Exchange Online — popup navigateur (même compte, peut s'enchaîner automatiquement)
 4. Utiliser les 6 tuiles du menu principal :
    - **Onboarding** — Créer un nouveau compte employé
    - **Offboarding** — Gérer le départ d'un employé
@@ -203,3 +210,6 @@ Le désinstallateur :
 | `InteractiveBrowserCredential failed` | "Allow public client flows" désactivé | App Registration → Authentication → Allow public client flows → **Yes** |
 | Langue non proposée au démarrage | `settings.json` existe déjà | Supprimer `%APPDATA%\M365Monster\settings.json` |
 | Mise à jour non détectée | Throttling actif | Supprimer `%APPDATA%\M365Monster\.last_update_check` |
+| Alias email — "La session Exchange Online n'est pas active" | Connexion EXO échouée au démarrage | Fermer et relancer l'outil ; vérifier que le compte a le rôle Exchange Administrator |
+| Alias email — erreur 400 ou "access denied" via Set-Mailbox | Permissions Exchange insuffisantes | Attribuer le rôle **Recipient Management** ou **Exchange Administrator** au compte dans EAC |
+| Module ExchangeOnlineManagement absent | Non installé ou installation échouée | Exécuter manuellement : `Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force` |
