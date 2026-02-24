@@ -246,17 +246,33 @@ if (-not $connectResult.Success) {
     exit
 }
 
-# Étape 4 : Dot-sourcing des modules GUI
+# Étape 4 : Connexion à Exchange Online (requis pour la gestion des alias email)
+Write-Log -Level "INFO" -Action "CONNEXION_EXO" -Message "Connexion à Exchange Online pour '$($Config.client_name)'..."
+
+$exoResult = Connect-ExchangeOnlineSession
+if (-not $exoResult.Success) {
+    # Non bloquant — avertissement mais l'outil reste utilisable (alias email indisponibles)
+    [System.Windows.Forms.MessageBox]::Show(
+        "Connexion Exchange Online échouée :`n$($exoResult.Error)`n`nLa gestion des alias email sera indisponible.`nToutes les autres fonctions restent opérationnelles.",
+        "Avertissement — Exchange Online",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Warning
+    ) | Out-Null
+    Write-Log -Level "WARNING" -Action "CONNEXION_EXO" -Message "EXO indisponible — alias email désactivés."
+}
+
+# Étape 5 : Dot-sourcing des modules GUI
 . "$script:RootPath\Modules\GUI_Main.ps1"
 . "$script:RootPath\Modules\GUI_Onboarding.ps1"
 . "$script:RootPath\Modules\GUI_Offboarding.ps1"
 . "$script:RootPath\Modules\GUI_Modification.ps1"
 # GUI_Settings.ps1 déjà chargé avant le sélecteur de client
 
-# Étape 5 : Affichage de la fenêtre principale
+# Étape 6 : Affichage de la fenêtre principale
 Write-Log -Level "INFO" -Action "GUI" -Message "Ouverture de la fenêtre principale."
 Show-MainWindow
 
-# Étape 6 : Nettoyage à la fermeture
+# Étape 7 : Nettoyage à la fermeture
 Write-Log -Level "INFO" -Action "FERMETURE" -Message "M365 Monster fermé."
 Disconnect-GraphAPI
+Disconnect-ExchangeOnlineSession
