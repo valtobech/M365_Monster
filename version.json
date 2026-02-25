@@ -1,6 +1,6 @@
 {
-  "version": "0.1.4",
-  "release_date": "2026-02-24",
+  "version": "0.1.5",
+  "release_date": "2026-02-25",
   "minimum_ps_version": "7.0",
-  "release_notes": "Version bêta initiale de M365 Monster"
+  "release_notes": "Audit Nested Groups : renommage croisé du groupe d'origine et suppression des membres transférés"
 }

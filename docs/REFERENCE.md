@@ -1,6 +1,6 @@
 # Référence Projet — M365 Monster
 
-> **Version :** 2.3
+> **Version :** 2.4
 > **Date :** 2026-02-25
 > **Portée :** Gestion du cycle de vie employé dans Microsoft 365 / Entra ID, avec interface graphique WinForms, multi-client, multi-langue.
 
@@ -244,6 +244,8 @@ Voir `docs/RELEASE_PROCESS.md`.
 - **proxyAddresses** : Exchange Online gère les alias de façon autonome. L'ajout/suppression via Graph fonctionne uniquement si la boîte Exchange Online est active et que le compte connecté a les droits suffisants.
 - **Endpoints Intune (beta)** : le module Nested Group Audit utilise les endpoints `beta` de Microsoft Graph pour les policies Intune (`/beta/deviceManagement/...`). Ces endpoints peuvent évoluer sans préavis. Chaque catégorie est scannée dans un `try/catch` individuel pour garantir la résilience.
 - **Graph Batch API** : le scan des groupes utilise `/$batch` (paquets de 20 requêtes parallèles) pour accélérer l'analyse des membres. Anti-throttling de 150ms entre chaque lot.
+- **Renommage de groupes** : le module Nested Group Audit utilise `Update-MgGroup` pour renommer le groupe d'origine lors de la séparation Users/Devices. Le `mailNickname` est mis à jour simultanément (caractères non-alphanumériques supprimés).
+- **Suppression de membres** : `Remove-MgGroupMemberByRef` est utilisé pour retirer les membres transférés du groupe source. L'opération est unitaire (un appel par membre) avec progression visuelle et compteur d'erreurs.
 
 ---
 
@@ -253,6 +255,7 @@ Voir [CHANGELOG.md](CHANGELOG.md) pour le détail complet de chaque version.
 
 | Version | Date | Résumé |
 |---|---|---|
+| `0.1.5` | 2026-02-25 | Audit Nested : renommage croisé groupe d'origine + suppression membres transférés |
 | `0.1.4` | 2026-02-25 | Nouveau module Audit Groupes Nested (Users+Devices) avec scan Intune |
 | `0.1.3` | 2026-02-23 | Alias email via Exchange Online (Set-Mailbox), connexion EXO, Shared Mailbox Audit |
 | `0.1.2` | 2026-02-22 | Corrections module Modification : alias, téléphones, groupes, UX |

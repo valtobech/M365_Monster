@@ -1,7 +1,6 @@
 {
   "_language": "English",
   "_code": "en",
-
   "app": {
     "name": "M365 Monster",
     "version_label": "v1.0.0",
@@ -10,13 +9,11 @@
     "domain_label": "Domain",
     "loading": "Loading..."
   },
-
   "lang_selector": {
     "title": "M365 Monster — Langue / Language",
     "prompt": "Choisissez votre langue / Choose your language",
     "btn_confirm": "Confirmer / Confirm"
   },
-
   "client_selector": {
     "title": "M365 Monster — Client selection",
     "heading": "Select the client to manage",
@@ -27,7 +24,6 @@
     "no_client_title": "No client found",
     "no_client_msg": "No client configuration file found in the Clients/ folder.\n\nPlease copy _Template.json and configure it for your client."
   },
-
   "main_menu": {
     "client_label": "Client",
     "tenant_label": "Tenant",
@@ -36,7 +32,6 @@
     "btn_change_client": "Change client",
     "change_client_title": "Change client",
     "change_client_msg": "Do you want to disconnect and change client?\n\nThe application will close. Relaunch M365 Monster to select another client.",
-
     "tile_onboarding": "Onboarding",
     "tile_onboarding_desc": "Create a new employee account",
     "tile_offboarding": "Offboarding",
@@ -53,14 +48,11 @@
     "tile_shared_mailbox_desc": "Audit shared mailboxes (active accounts, licenses, sign-in)",
     "tile_nested_audit": "Mixed Groups (Nested)",
     "tile_nested_audit_desc": "Audit Entra groups containing Users + Devices, Intune impact",
-
     "script_not_found_title": "Script not found",
     "script_not_found_msg": "The following file was not found:\n\n{0}\n\nPlace your script in the Scripts\\ folder of the project."
   },
-
   "onboarding": {
     "title": "Onboarding - New employee - {0}",
-
     "section_identity": "IDENTITY",
     "field_lastname": "Last name",
     "field_firstname": "First name",
@@ -71,7 +63,6 @@
     "upn_none": "No variant generated.",
     "upn_required": "Please fill in Last name and First name before generating the email.",
     "upn_required_title": "Required fields",
-
     "section_position": "POSITION",
     "field_job_title": "Job title",
     "field_department": "Department",
@@ -83,20 +74,15 @@
     "manager_no_result": "No results.",
     "manager_search_title": "Search",
     "field_usage_location": "Usage Location",
-
     "section_license": "LICENSE",
     "field_license_group": "License pack",
     "license_none": "(no license)",
-
     "section_groups": "GROUP MEMBERSHIP",
-
     "section_password": "PASSWORD",
     "password_info": "A {0}-character password will be automatically generated and displayed only once after creation.",
-
     "btn_create": "Create account",
     "btn_cancel": "Cancel",
     "creating": "Creating account...",
-
     "validation_lastname": "Last name is required.",
     "validation_firstname": "First name is required.",
     "validation_email": "Please generate and select an email format.",
@@ -104,7 +90,6 @@
     "validation_department": "Department is required.",
     "validation_employee_type": "Employee Type is required.",
     "validation_usage_location": "Usage Location is required.",
-
     "confirm_title": "Confirm onboarding",
     "confirm_header": "Do you confirm the creation of the following account?",
     "confirm_fullname": "Full name",
@@ -117,14 +102,12 @@
     "confirm_manager": "Manager",
     "confirm_license": "License (group)",
     "confirm_groups": "Groups",
-
     "result_partial_title": "Partial onboarding",
     "result_partial_msg": "Account created with warnings:\n\n{0}",
     "result_error_title": "Onboarding error",
     "result_error_msg": "An error occurred:\n\n{0}",
     "error_creation_failed": "Account creation failed: {0}"
   },
-
   "password_dialog": {
     "title": "Generated credentials",
     "warning": "⚠ These credentials will only be displayed once!",
@@ -137,9 +120,6 @@
     "clipboard_user": "Username",
     "clipboard_pass": "Password"
   },
-
-
-  
   "modification": {
     "title": "Modification — {0}",
     "search_label": "Search employee to modify",
@@ -293,8 +273,6 @@
     "error_forbidden_reconnect": "❌ Access denied (403 Forbidden)\n\nThe current token does not include the required permissions.\n\n➡ Solution: close and relaunch the tool to force a new token.",
     "error_proxy_badrequest": "❌ Cannot modify email aliases directly via Graph API.\n\nExchange Online mailboxes manage proxy addresses independently.\n\n➡ Use instead:\n  • Exchange Admin Center (EAC) → Recipients → Mailboxes\n  • Exchange Online PowerShell: Set-Mailbox -EmailAddresses"
   },
-
-  
   "shared_mailbox_audit": {
     "title": "M365 Monster — Shared Mailbox Audit",
     "header_title": "Audit — Shared Mailbox",
@@ -352,25 +330,30 @@
     "error_exo_module": "The ExchangeOnlineManagement module is not installed.\n\nInstall it with:\nInstall-Module ExchangeOnlineManagement -Scope CurrentUser",
     "error_exo_connect": "Error connecting to Exchange Online:\n{0}",
     "alert_graph_error": "⚠ Graph enrichment error",
+    "selected_all_disabled": "Selection: all selected accounts are already disabled.",
+    "selected_multi": "{0} shared mailboxes selected (active accounts).",
+    "warning_multi_signin": "⚠ WARNING: {0} selected account(s) have a detected interactive sign-in. Manual validation required.",
+    "btn_disable_multi": "Disable {0} account(s)",
+    "disabling_progress": "Disabling... {0} / {1}",
+    "confirm_disable_multi": "Do you want to disable {0} user account(s) linked to shared mailboxes?\n\n{2}\n\nNo interactive sign-in detected. The shared mailboxes will continue to function normally.",
+    "confirm_disable_multi_signin": "⚠ WARNING — {1} account(s) with interactive sign-in detected!\n\nDo you want to disable {0} user account(s) linked to shared mailboxes?\n\n{2}\n\nMake sure these are shared mailboxes and not active user accounts.",
+    "disable_batch_success": "{0} account(s) successfully disabled.\n\nThe shared mailboxes will continue to function for users with access rights.",
+    "disable_batch_partial": "{0} account(s) successfully disabled.\n{1} error(s) encountered:\n\n{2}",
     "footer": "M365 Monster — Shared Mailbox Audit"
   },
-
   "nested_group_audit": {
     "title": "M365 Monster — Mixed Groups Audit (Nested)",
     "header_title": "Mixed Groups Audit (Users + Devices)",
     "header_subtitle": "Identifies Entra groups containing both users and devices, and associated Intune policies.",
-
     "tab_scan": "Group Scan",
     "tab_members": "Member Details",
     "tab_intune": "Intune Impact",
     "tab_actions": "Remediation",
-
     "btn_scan": "Scan Groups",
     "btn_cancel": "Cancel",
     "btn_export": "Export CSV",
     "btn_scan_intune": "Scan Intune",
     "btn_create_group": "Create group and transfer",
-
     "lbl_filter": "Filter:",
     "lbl_users": "Users",
     "lbl_devices": "Devices",
@@ -379,7 +362,6 @@
     "lbl_new_group_name": "Group name:",
     "lbl_description": "Description:",
     "lbl_actions_log": "Action Log",
-
     "stats_empty": "Click \"Scan Groups\" to analyze Entra groups.",
     "scanning": "Retrieving groups...",
     "scanning_progress": "Scanning: {0} / {1} groups...",
@@ -387,11 +369,9 @@
     "intune_stats": "{0} Intune policy/app(s) reference this group ({1} categories scanned)",
     "intune_no_results": "No Intune policy or application references this group.",
     "intune_scan_title": "Intune Scan Complete",
-
     "no_group_selected": "No group selected — select a group in the Scan tab.",
     "selected_group": "Selected group: {0}",
     "members_to_transfer": "{0} member(s) to transfer",
-
     "col_group_name": "Group Name",
     "col_group_id": "Group ID",
     "col_group_type": "Type",
@@ -412,12 +392,10 @@
     "col_intune_intent": "Intent",
     "col_intune_assignment": "Assignment",
     "col_intune_id": "Policy / App ID",
-
     "dynamic": "Dynamic",
     "assigned": "Assigned",
     "assignment_included": "Included",
     "assignment_excluded": "Excluded",
-
     "cat_apps": "Applications",
     "cat_app_config": "App Configurations",
     "cat_config_policies": "Configuration Policies",
@@ -430,16 +408,13 @@
     "cat_driver_updates": "Driver Updates",
     "cat_remediation": "Remediation Scripts",
     "cat_platform_scripts": "Platform Scripts",
-
     "grp_create_user": "Create a Users Group",
     "grp_create_device": "Create a Devices Group",
     "auto_desc_user": "Users group separated from mixed group \"{0}\" — created by M365 Monster",
     "auto_desc_device": "Devices group separated from mixed group \"{0}\" — created by M365 Monster",
-
     "confirm_title": "Confirmation",
     "confirm_create_user": "Do you want to create group \"{0}\" and transfer {1} user(s)?\n\nMembers will be ADDED to the new group.\nThey will NOT be removed from the original group.",
     "confirm_create_device": "Do you want to create group \"{0}\" and transfer {1} device(s)?\n\nMembers will be ADDED to the new group.\nThey will NOT be removed from the original group.",
-
     "success_title": "Operation Successful",
     "success_create_group": "Group \"{0}\" has been created successfully.\n\n{1} member(s) added, {2} error(s).",
     "error_title": "Error",
@@ -451,21 +426,32 @@
     "export_success_title": "Export Successful",
     "export_success_msg": "File saved:\n{0}\n\n{1} row(s) exported.",
     "export_error_msg": "Error while exporting CSV:\n{0}",
-
     "log_creating_group": "Creating group \"{0}\"...",
     "log_group_created": "Group \"{0}\" created (Id: {1}). Adding members...",
     "log_members_progress": "Progress: {0}/{1} members added...",
     "log_transfer_complete": "Transfer complete: {0}/{1} members added, {2} error(s).",
     "log_error": "ERROR: {0}",
-
-    "footer": "M365 Monster — Mixed Groups Audit (Nested Groups)"
+    "footer": "M365 Monster — Mixed Groups Audit (Nested Groups)",
+    "chk_remove_from_origin": "Remove transferred members from the original group",
+    "chk_rename_origin_device": "Rename the original group to _Device",
+    "chk_rename_origin_user": "Rename the original group to _User",
+    "confirm_create_user_v2": "Do you want to create group \"{0}\" and transfer {1} user(s)?\n{2}",
+    "confirm_create_device_v2": "Do you want to create group \"{0}\" and transfer {1} device(s)?\n{2}",
+    "confirm_option_remove": "✔ Transferred members will be REMOVED from the original group.",
+    "confirm_option_rename": "✔ Group \"{0}\" will be renamed to \"{1}\".",
+    "success_removed_members": "{0} member(s) removed from original group ({1} error(s)).",
+    "success_renamed_group": "Original group renamed to \"{0}\".",
+    "log_renaming_group": "Renaming original group to \"{0}\"...",
+    "log_rename_success": "Original group renamed to \"{0}\" successfully.",
+    "log_rename_error": "Error renaming to \"{0}\": {1}",
+    "log_removing_members": "Removing {0} member(s) from group \"{1}\"...",
+    "log_remove_progress": "Removal in progress: {0}/{1} members removed...",
+    "log_remove_complete": "Removal complete: {0}/{1} members removed, {2} error(s)."
   },
-
   "confirm_dialog": {
     "btn_yes": "Yes",
     "btn_no": "No"
   },
-
   "update": {
     "available_title": "Update available — M365 Monster",
     "available_msg": "A new version of M365 Monster is available!\n\nCurrent version : {0}\nNew version     : {1}\nRelease date    : {2}\n\n{3}\n\nDo you want to update now?",

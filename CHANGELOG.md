@@ -6,6 +6,38 @@ Versioning selon [Semantic Versioning](https://semver.org/lang/fr/).
 
 ---
 
+## [0.1.5] — 2026-02-25
+
+### Ajouté
+
+**Audit Nested Groups — Renommage croisé du groupe d'origine**
+
+- Lors de la création d'un groupe `_Device`, le groupe d'origine peut être automatiquement renommé en `_User` (et inversement).
+- Checkbox « Renommer le groupe d'origine en _Device / _User » ajoutée dans l'onglet Remédiation (cochée par défaut).
+- Nouvelle fonction interne `Rename-EntraGroup` : appelle `Update-MgGroup` pour mettre à jour le `displayName` et le `mailNickname` du groupe source.
+
+**Audit Nested Groups — Suppression des membres transférés du groupe d'origine**
+
+- Les membres (users ou devices) transférés vers le nouveau groupe sont désormais retirés du groupe d'origine via `Remove-MgGroupMemberByRef`.
+- Checkbox « Supprimer les membres transférés du groupe d'origine » ajoutée dans l'onglet Remédiation (cochée par défaut).
+- Nouvelle fonction interne `Remove-MembersFromSourceGroup` : boucle de suppression avec progression visuelle, compteur d'erreurs et journalisation.
+
+**Confirmation dynamique et messages de succès enrichis**
+
+- Les messages de confirmation affichent désormais les actions sélectionnées (suppression, renommage) avec des indicateurs visuels (✔).
+- Le message de succès récapitule toutes les opérations effectuées : création du groupe, nombre de membres ajoutés, nombre de membres retirés, renommage du groupe d'origine.
+
+**Internationalisation**
+
+- 15 nouvelles clés i18n (FR + EN) dans la section `nested_group_audit` : checkboxes, confirmations dynamiques, messages de succès, journalisation des opérations de renommage et suppression.
+
+### Mis à jour
+
+- `GUI_NestedGroupAudit.ps1` : onglet Remédiation agrandi (GroupBox 200px → 240px) pour accueillir les checkboxes, journal des actions repositionné.
+- `REFERENCE.md` : version du document, note technique sur `Update-MgGroup` / `Remove-MgGroupMemberByRef`, tableau historique des versions.
+
+---
+
 ## [0.1.4] — 2026-02-25
 
 ### Ajouté

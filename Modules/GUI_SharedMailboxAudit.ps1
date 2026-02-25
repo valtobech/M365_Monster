@@ -6,7 +6,8 @@
     Module d'audit des boîtes aux lettres partagées (Shared Mailbox).
     Identifie les BAL partagées dont l'objet utilisateur associé est actif,
     vérifie les licences assignées et le dernier sign-in interactif.
-    Permet de désactiver le compte utilisateur lié à la BAL après validation manuelle.
+    Permet de désactiver un ou plusieurs comptes utilisateurs liés aux BAL
+    après validation manuelle.
 
     Objectifs :
     - Lister toutes les Shared Mailbox du tenant via Graph API
@@ -14,7 +15,8 @@
     - Filtrer par licence assignée (avec / sans licence)
     - Afficher le dernier sign-in interactif (lastSuccessfulSignInDateTime)
     - Alerter si un sign-in interactif a été détecté (validation manuelle requise)
-    - Permettre la désactivation du compte utilisateur lié à la BAL
+    - Permettre la désactivation groupée des comptes utilisateurs liés aux BAL
+      via multi-sélection (checkbox + Ctrl/Shift)
 
 .DEPENDANCES
     - Core/Functions.ps1 (Write-Log, Show-ConfirmDialog, Show-ResultDialog)
@@ -41,7 +43,7 @@ function Show-SharedMailboxAuditForm {
     .SYNOPSIS
         Affiche le formulaire d'audit des boîtes aux lettres partagées.
         Charge les BAL partagées depuis Graph API, permet le filtrage
-        et la désactivation des comptes utilisateurs associés.
+        et la désactivation groupée des comptes utilisateurs associés.
     #>
 
     # =================================================================
@@ -49,7 +51,6 @@ function Show-SharedMailboxAuditForm {
     # =================================================================
     $script:SharedMailboxData = @()          # Données brutes chargées depuis Graph
     $script:FilteredData = @()              # Données après filtrage
-    $script:SelectedMailbox = $null          # BAL sélectionnée dans le DataGridView
     $script:LicenseSkuMap = @{}             # Cache SKU ID → Nom convivial
 
     # =================================================================
@@ -222,7 +223,7 @@ function Show-SharedMailboxAuditForm {
     $panelStats.Controls.Add($lblStats)
 
     # =================================================================
-    # DataGridView — tableau principal
+    # DataGridView — tableau principal (multi-sélection + checkbox)
     # =================================================================
     $dgv = New-Object System.Windows.Forms.DataGridView
     $dgv.Location = New-Object System.Drawing.Point(15, 195)
@@ -233,9 +234,9 @@ function Show-SharedMailboxAuditForm {
     $dgv.AllowUserToAddRows = $false
     $dgv.AllowUserToDeleteRows = $false
     $dgv.AllowUserToResizeRows = $false
-    $dgv.ReadOnly = $true
+    $dgv.ReadOnly = $false              # Nécessaire pour la colonne checkbox
     $dgv.SelectionMode = "FullRowSelect"
-    $dgv.MultiSelect = $false
+    $dgv.MultiSelect = $true            # ← Activation multi-sélection Ctrl/Shift
     $dgv.RowHeadersVisible = $false
     $dgv.AutoSizeColumnsMode = "None"
     $dgv.Font = New-Object System.Drawing.Font("Segoe UI", 9)
@@ -249,47 +250,64 @@ function Show-SharedMailboxAuditForm {
     $dgv.DefaultCellStyle.SelectionForeColor = $colorDark
     $form.Controls.Add($dgv)
 
-    # Définition des colonnes
+    # --- Colonne checkbox pour la sélection ---
+    $colCheck = New-Object System.Windows.Forms.DataGridViewCheckBoxColumn
+    $colCheck.Name = "Select"
+    $colCheck.HeaderText = ""
+    $colCheck.Width = 35
+    $colCheck.FalseValue = $false
+    $colCheck.TrueValue = $true
+    $colCheck.ReadOnly = $false
+    $dgv.Columns.Add($colCheck) | Out-Null
+
+    # Définition des colonnes de données (en ReadOnly)
     $colDisplayName = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $colDisplayName.Name = "DisplayName"
     $colDisplayName.HeaderText = Get-Text "shared_mailbox_audit.col_displayname"
-    $colDisplayName.Width = 200
+    $colDisplayName.Width = 195
+    $colDisplayName.ReadOnly = $true
     $dgv.Columns.Add($colDisplayName) | Out-Null
 
     $colUPN = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $colUPN.Name = "UPN"
     $colUPN.HeaderText = Get-Text "shared_mailbox_audit.col_upn"
-    $colUPN.Width = 250
+    $colUPN.Width = 240
+    $colUPN.ReadOnly = $true
     $dgv.Columns.Add($colUPN) | Out-Null
 
     $colAccountStatus = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $colAccountStatus.Name = "AccountStatus"
     $colAccountStatus.HeaderText = Get-Text "shared_mailbox_audit.col_account_status"
     $colAccountStatus.Width = 110
+    $colAccountStatus.ReadOnly = $true
     $dgv.Columns.Add($colAccountStatus) | Out-Null
 
     $colLicenses = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $colLicenses.Name = "Licenses"
     $colLicenses.HeaderText = Get-Text "shared_mailbox_audit.col_licenses"
-    $colLicenses.Width = 250
+    $colLicenses.Width = 230
+    $colLicenses.ReadOnly = $true
     $dgv.Columns.Add($colLicenses) | Out-Null
 
     $colLastSignIn = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $colLastSignIn.Name = "LastInteractiveSignIn"
     $colLastSignIn.HeaderText = Get-Text "shared_mailbox_audit.col_last_signin"
     $colLastSignIn.Width = 185
+    $colLastSignIn.ReadOnly = $true
     $dgv.Columns.Add($colLastSignIn) | Out-Null
 
     $colAlert = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $colAlert.Name = "Alert"
     $colAlert.HeaderText = Get-Text "shared_mailbox_audit.col_alert"
     $colAlert.Width = 240
+    $colAlert.ReadOnly = $true
     $dgv.Columns.Add($colAlert) | Out-Null
 
     # Colonne cachée pour l'ID utilisateur
     $colUserId = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $colUserId.Name = "UserId"
     $colUserId.Visible = $false
+    $colUserId.ReadOnly = $true
     $dgv.Columns.Add($colUserId) | Out-Null
 
     # =================================================================
@@ -301,7 +319,7 @@ function Show-SharedMailboxAuditForm {
     $panelActions.BackColor = $colorWhite
     $form.Controls.Add($panelActions)
 
-    # Infos de la BAL sélectionnée
+    # Infos de la sélection courante
     $lblSelectedInfo = New-Object System.Windows.Forms.Label
     $lblSelectedInfo.Text = Get-Text "shared_mailbox_audit.no_selection"
     $lblSelectedInfo.Font = New-Object System.Drawing.Font("Segoe UI", 9)
@@ -319,7 +337,7 @@ function Show-SharedMailboxAuditForm {
     $lblSignInWarning.Size = New-Object System.Drawing.Size(800, 20)
     $panelActions.Controls.Add($lblSignInWarning)
 
-    # Bouton Désactiver le compte utilisateur
+    # Bouton Désactiver (multi-sélection)
     $btnDisable = New-Object System.Windows.Forms.Button
     $btnDisable.Text = Get-Text "shared_mailbox_audit.btn_disable"
     $btnDisable.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
@@ -346,7 +364,7 @@ function Show-SharedMailboxAuditForm {
     $panelActions.Controls.Add($btnRefreshRow)
 
     # =================================================================
-    # Barre de progression
+    # Barre de progression (désactivation groupée)
     # =================================================================
     $progressBar = New-Object System.Windows.Forms.ProgressBar
     $progressBar.Location = New-Object System.Drawing.Point(15, 748)
@@ -418,13 +436,11 @@ function Show-SharedMailboxAuditForm {
         # ── Étape 1 : Charger le module en mémoire s'il ne l'est pas déjà ──
         $exoLoaded = Get-Module -Name "ExchangeOnlineManagement" -ErrorAction SilentlyContinue
         if (-not $exoLoaded) {
-            # Tenter l'import — cherche dans tous les chemins PSModulePath
             try {
                 Import-Module ExchangeOnlineManagement -ErrorAction Stop
                 Write-Log -Level "INFO" -Action "SHARED_AUDIT" -Message "Module ExchangeOnlineManagement importé."
             }
             catch {
-                # Vérifier s'il est installé mais pas encore importé
                 $exoAvailable = Get-Module -ListAvailable -Name "ExchangeOnlineManagement" -ErrorAction SilentlyContinue
                 if (-not $exoAvailable) {
                     Write-Log -Level "ERROR" -Action "SHARED_AUDIT" -Message "Module ExchangeOnlineManagement non installé."
@@ -448,7 +464,6 @@ function Show-SharedMailboxAuditForm {
             return $true
         }
         catch {
-            # Pas connecté ou session expirée, on continue vers la connexion
             Write-Log -Level "INFO" -Action "SHARED_AUDIT" -Message "Aucune session EXO active, connexion en cours..."
         }
 
@@ -459,7 +474,6 @@ function Show-SharedMailboxAuditForm {
                 ErrorAction = "Stop"
             }
 
-            # Utiliser le même AppId que Graph pour la cohérence
             if (-not [string]::IsNullOrWhiteSpace($Config.client_id)) {
                 $connectParams.AppId = $Config.client_id
                 $connectParams.Organization = $Config.tenant_id
@@ -478,6 +492,66 @@ function Show-SharedMailboxAuditForm {
         }
     }
 
+    # --- Construction d'un objet résultat enrichi à partir d'une réponse Graph ---
+    function Build-MailboxResult {
+        <#
+        .SYNOPSIS
+            Construit un PSCustomObject standardisé à partir des données Graph d'un user.
+            Factorise la logique commune entre Get-SharedMailboxes et Update-SingleRowInPlace.
+        #>
+        param(
+            [Parameter(Mandatory)]$GraphUser,
+            [string]$FallbackMail = ""
+        )
+
+        # Résolution des licences
+        $licenseNames = @()
+        if ($GraphUser.assignedLicenses -and $GraphUser.assignedLicenses.Count -gt 0) {
+            foreach ($lic in $GraphUser.assignedLicenses) {
+                $licenseNames += (Resolve-SkuName -SkuId $lic.skuId)
+            }
+        }
+
+        # Extraction du dernier sign-in interactif
+        $lastInteractiveSignIn = $null
+        $hasInteractiveSignIn = $false
+        $signInActivity = $GraphUser.signInActivity
+        if ($signInActivity -and $signInActivity.lastSuccessfulSignInDateTime) {
+            $lastInteractiveSignIn = $signInActivity.lastSuccessfulSignInDateTime
+            $hasInteractiveSignIn = $true
+        }
+
+        # Détermination de l'alerte
+        $alertText = ""
+        if ($hasInteractiveSignIn) {
+            $alertText = Get-Text "shared_mailbox_audit.alert_signin_detected"
+        }
+        if ($GraphUser.accountEnabled -eq $true -and $licenseNames.Count -gt 0) {
+            if ($alertText -ne "") { $alertText += " | " }
+            $alertText += Get-Text "shared_mailbox_audit.alert_active_licensed"
+        }
+        elseif ($GraphUser.accountEnabled -eq $true) {
+            if ($alertText -ne "") { $alertText += " | " }
+            $alertText += Get-Text "shared_mailbox_audit.alert_active_no_license"
+        }
+        if ($alertText -eq "") {
+            $alertText = Get-Text "shared_mailbox_audit.alert_ok"
+        }
+
+        return [PSCustomObject]@{
+            UserId                = $GraphUser.id
+            DisplayName           = $GraphUser.displayName
+            UPN                   = $GraphUser.userPrincipalName
+            Mail                  = if ($GraphUser.mail) { $GraphUser.mail } else { $FallbackMail }
+            AccountEnabled        = $GraphUser.accountEnabled
+            LicenseNames          = ($licenseNames -join ", ")
+            HasLicense            = ($licenseNames.Count -gt 0)
+            LastInteractiveSignIn = $lastInteractiveSignIn
+            HasInteractiveSignIn  = $hasInteractiveSignIn
+            Alert                 = $alertText
+        }
+    }
+
     # --- Chargement des Shared Mailbox via EXO + enrichissement Graph ---
     function Get-SharedMailboxes {
         <#
@@ -488,7 +562,7 @@ function Show-SharedMailboxAuditForm {
             Stratégie en 3 étapes :
             1. Exchange Online : Get-EXOMailbox -RecipientTypeDetails SharedMailbox (rapide, ~5 sec)
             2. Graph API beta : enrichir avec signInActivity + assignedLicenses par batch
-            3. Construction des objets résultat avec alertes
+            3. Construction des objets résultat avec alertes via Build-MailboxResult
         #>
 
         Write-Log -Level "INFO" -Action "SHARED_AUDIT" -Message "Début du chargement des Shared Mailbox."
@@ -514,10 +588,8 @@ function Show-SharedMailboxAuditForm {
             }
 
             # ── ÉTAPE 3 : Enrichir avec Graph API $batch (signInActivity, licences, accountEnabled) ──
-            # Graph $batch permet d'envoyer jusqu'à 20 requêtes en un seul appel HTTP
             Write-Log -Level "INFO" -Action "SHARED_AUDIT" -Message "Enrichissement Graph API par batch (signInActivity, licences)..."
 
-            $graphHeaders = @{ "ConsistencyLevel" = "eventual" }
             $sharedResults = @()
             $batchSize = 20
 
@@ -569,54 +641,7 @@ function Show-SharedMailboxAuditForm {
                         $mbx = $currentBatch[$idx]
 
                         if ($resp.status -eq 200) {
-                            $user = $resp.body
-
-                            # Résolution des licences
-                            $licenseNames = @()
-                            if ($user.assignedLicenses -and $user.assignedLicenses.Count -gt 0) {
-                                foreach ($lic in $user.assignedLicenses) {
-                                    $licenseNames += (Resolve-SkuName -SkuId $lic.skuId)
-                                }
-                            }
-
-                            # Extraction du dernier sign-in interactif
-                            $lastInteractiveSignIn = $null
-                            $hasInteractiveSignIn = $false
-                            $signInActivity = $user.signInActivity
-                            if ($signInActivity -and $signInActivity.lastSuccessfulSignInDateTime) {
-                                $lastInteractiveSignIn = $signInActivity.lastSuccessfulSignInDateTime
-                                $hasInteractiveSignIn = $true
-                            }
-
-                            # Détermination de l'alerte
-                            $alertText = ""
-                            if ($hasInteractiveSignIn) {
-                                $alertText = Get-Text "shared_mailbox_audit.alert_signin_detected"
-                            }
-                            if ($user.accountEnabled -eq $true -and $licenseNames.Count -gt 0) {
-                                if ($alertText -ne "") { $alertText += " | " }
-                                $alertText += Get-Text "shared_mailbox_audit.alert_active_licensed"
-                            }
-                            elseif ($user.accountEnabled -eq $true) {
-                                if ($alertText -ne "") { $alertText += " | " }
-                                $alertText += Get-Text "shared_mailbox_audit.alert_active_no_license"
-                            }
-                            if ($alertText -eq "") {
-                                $alertText = Get-Text "shared_mailbox_audit.alert_ok"
-                            }
-
-                            $sharedResults += [PSCustomObject]@{
-                                UserId                = $user.id
-                                DisplayName           = $user.displayName
-                                UPN                   = $user.userPrincipalName
-                                Mail                  = if ($user.mail) { $user.mail } else { $mbx.PrimarySmtpAddress }
-                                AccountEnabled        = $user.accountEnabled
-                                LicenseNames          = ($licenseNames -join ", ")
-                                HasLicense            = ($licenseNames.Count -gt 0)
-                                LastInteractiveSignIn = $lastInteractiveSignIn
-                                HasInteractiveSignIn  = $hasInteractiveSignIn
-                                Alert                 = $alertText
-                            }
+                            $sharedResults += Build-MailboxResult -GraphUser $resp.body -FallbackMail $mbx.PrimarySmtpAddress
                         }
                         else {
                             # Réponse en erreur pour cet utilisateur — fallback EXO
@@ -678,43 +703,38 @@ function Show-SharedMailboxAuditForm {
         # Filtre statut utilisateur
         $statusIndex = $cboFilterStatus.SelectedIndex
         if ($statusIndex -eq 1) {
-            # Actif uniquement
             $script:FilteredData = $script:FilteredData | Where-Object { $_.AccountEnabled -eq $true }
         }
         elseif ($statusIndex -eq 2) {
-            # Inactif uniquement
             $script:FilteredData = $script:FilteredData | Where-Object { $_.AccountEnabled -eq $false }
         }
 
         # Filtre licence
         $licenseIndex = $cboFilterLicense.SelectedIndex
         if ($licenseIndex -eq 1) {
-            # Avec licence
             $script:FilteredData = $script:FilteredData | Where-Object { $_.HasLicense -eq $true }
         }
         elseif ($licenseIndex -eq 2) {
-            # Sans licence
             $script:FilteredData = $script:FilteredData | Where-Object { $_.HasLicense -eq $false }
         }
 
         # Filtre sign-in interactif
         $signInIndex = $cboFilterSignIn.SelectedIndex
         if ($signInIndex -eq 1) {
-            # Jamais de sign-in
             $script:FilteredData = $script:FilteredData | Where-Object { $_.HasInteractiveSignIn -eq $false }
         }
         elseif ($signInIndex -eq 2) {
-            # Sign-in détecté
             $script:FilteredData = $script:FilteredData | Where-Object { $_.HasInteractiveSignIn -eq $true }
         }
 
-        # Mise à jour du DataGridView
+        # Mise à jour complète du DataGridView (rebuild)
         Update-DataGridView
         Update-StatsLabel
     }
 
-    # --- Mise à jour du DataGridView ---
+    # --- Mise à jour complète du DataGridView (rebuild) ---
     function Update-DataGridView {
+        $dgv.SuspendLayout()
         $dgv.Rows.Clear()
 
         foreach ($item in $script:FilteredData) {
@@ -744,6 +764,7 @@ function Show-SharedMailboxAuditForm {
             }
 
             $rowIndex = $dgv.Rows.Add(
+                $false,                 # Checkbox décochée par défaut
                 $item.DisplayName,
                 $item.UPN,
                 $statusText,
@@ -771,11 +792,13 @@ function Show-SharedMailboxAuditForm {
                 $row.Cells["LastInteractiveSignIn"].Style.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
             }
 
-            # Alerte non-OK = orange/rouge
+            # Alerte non-OK = orange
             if ($item.Alert -ne (Get-Text "shared_mailbox_audit.alert_ok")) {
                 $row.Cells["Alert"].Style.ForeColor = $colorOrange
             }
         }
+
+        $dgv.ResumeLayout()
     }
 
     # --- Mise à jour du label de statistiques ---
@@ -790,8 +813,13 @@ function Show-SharedMailboxAuditForm {
         $lblStats.ForeColor = $colorDark
     }
 
-    # --- Rafraîchissement d'une ligne spécifique après action ---
-    function Update-SingleRow {
+    # --- Rafraîchissement IN-PLACE d'une ligne spécifique (sans rebuild de la grille) ---
+    function Update-SingleRowInPlace {
+        <#
+        .SYNOPSIS
+            Met à jour les données Graph d'un seul utilisateur et rafraîchit
+            uniquement la ligne correspondante dans le DGV — pas de rebuild.
+        #>
         param([string]$UserId)
 
         try {
@@ -801,65 +829,232 @@ function Show-SharedMailboxAuditForm {
             $graphHeaders = @{ "ConsistencyLevel" = "eventual" }
             $user = Invoke-MgGraphRequest -Method GET -Uri $uri -Headers $graphHeaders -ErrorAction Stop
 
-            # Mettre à jour dans les données brutes
-            $existingIndex = -1
+            # Construire l'objet mis à jour
+            $updatedItem = Build-MailboxResult -GraphUser $user
+
+            # Mettre à jour dans les données brutes ($script:SharedMailboxData)
             for ($i = 0; $i -lt $script:SharedMailboxData.Count; $i++) {
                 if ($script:SharedMailboxData[$i].UserId -eq $UserId) {
-                    $existingIndex = $i
+                    $script:SharedMailboxData[$i] = $updatedItem
                     break
                 }
             }
 
-            if ($existingIndex -ge 0) {
-                $licenseNames = @()
-                if ($user.assignedLicenses -and $user.assignedLicenses.Count -gt 0) {
-                    foreach ($lic in $user.assignedLicenses) {
-                        $licenseNames += (Resolve-SkuName -SkuId $lic.skuId)
-                    }
+            # Mettre à jour dans les données filtrées ($script:FilteredData)
+            for ($i = 0; $i -lt $script:FilteredData.Count; $i++) {
+                if ($script:FilteredData[$i].UserId -eq $UserId) {
+                    $script:FilteredData[$i] = $updatedItem
+                    break
                 }
-
-                $lastInteractiveSignIn = $null
-                $hasInteractiveSignIn = $false
-                if ($user.signInActivity -and $user.signInActivity.lastSuccessfulSignInDateTime) {
-                    $lastInteractiveSignIn = $user.signInActivity.lastSuccessfulSignInDateTime
-                    $hasInteractiveSignIn = $true
-                }
-
-                $alertText = ""
-                if ($hasInteractiveSignIn) {
-                    $alertText = Get-Text "shared_mailbox_audit.alert_signin_detected"
-                }
-                if ($user.accountEnabled -eq $true -and $licenseNames.Count -gt 0) {
-                    if ($alertText -ne "") { $alertText += " | " }
-                    $alertText += Get-Text "shared_mailbox_audit.alert_active_licensed"
-                }
-                elseif ($user.accountEnabled -eq $true) {
-                    if ($alertText -ne "") { $alertText += " | " }
-                    $alertText += Get-Text "shared_mailbox_audit.alert_active_no_license"
-                }
-                if ($alertText -eq "") { $alertText = Get-Text "shared_mailbox_audit.alert_ok" }
-
-                $script:SharedMailboxData[$existingIndex] = [PSCustomObject]@{
-                    UserId                = $user.id
-                    DisplayName           = $user.displayName
-                    UPN                   = $user.userPrincipalName
-                    Mail                  = $user.mail
-                    AccountEnabled        = $user.accountEnabled
-                    LicenseNames          = ($licenseNames -join ", ")
-                    HasLicense            = ($licenseNames.Count -gt 0)
-                    LastInteractiveSignIn = $lastInteractiveSignIn
-                    HasInteractiveSignIn  = $hasInteractiveSignIn
-                    Alert                 = $alertText
-                }
-
-                # Re-filtrer et rafraîchir la vue
-                Update-FilteredView
-
-                Write-Log -Level "SUCCESS" -Action "SHARED_AUDIT" -UPN $UserId -Message "Données rafraîchies."
             }
+
+            # Mettre à jour la ligne dans le DGV sans rebuild
+            foreach ($row in $dgv.Rows) {
+                if ($row.Cells["UserId"].Value -eq $UserId) {
+                    # Texte du statut
+                    $row.Cells["AccountStatus"].Value = if ($updatedItem.AccountEnabled) {
+                        Get-Text "shared_mailbox_audit.status_active"
+                    } else {
+                        Get-Text "shared_mailbox_audit.status_disabled"
+                    }
+
+                    # Licences
+                    $row.Cells["Licenses"].Value = if ([string]::IsNullOrWhiteSpace($updatedItem.LicenseNames)) {
+                        Get-Text "shared_mailbox_audit.no_license"
+                    } else {
+                        $updatedItem.LicenseNames
+                    }
+
+                    # Sign-in
+                    $row.Cells["LastInteractiveSignIn"].Value = if ($updatedItem.HasInteractiveSignIn) {
+                        try {
+                            $dt = [DateTime]::Parse($updatedItem.LastInteractiveSignIn)
+                            $dt.ToString("yyyy-MM-dd HH:mm")
+                        } catch { $updatedItem.LastInteractiveSignIn }
+                    } else {
+                        Get-Text "shared_mailbox_audit.signin_never"
+                    }
+
+                    # Alerte
+                    $row.Cells["Alert"].Value = $updatedItem.Alert
+
+                    # Nom et UPN (peuvent avoir changé)
+                    $row.Cells["DisplayName"].Value = $updatedItem.DisplayName
+                    $row.Cells["UPN"].Value = $updatedItem.UPN
+
+                    # --- Re-colorisation de la ligne ---
+                    # Statut
+                    if ($updatedItem.AccountEnabled) {
+                        $row.Cells["AccountStatus"].Style.ForeColor = $colorOrange
+                        $row.Cells["AccountStatus"].Style.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+                    }
+                    else {
+                        $row.Cells["AccountStatus"].Style.ForeColor = $colorGreen
+                        $row.Cells["AccountStatus"].Style.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+                    }
+
+                    # Sign-in
+                    if ($updatedItem.HasInteractiveSignIn) {
+                        $row.Cells["LastInteractiveSignIn"].Style.ForeColor = $colorRed
+                        $row.Cells["LastInteractiveSignIn"].Style.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+                    }
+                    else {
+                        $row.Cells["LastInteractiveSignIn"].Style.ForeColor = $colorDark
+                        $row.Cells["LastInteractiveSignIn"].Style.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+                    }
+
+                    # Alerte
+                    if ($updatedItem.Alert -ne (Get-Text "shared_mailbox_audit.alert_ok")) {
+                        $row.Cells["Alert"].Style.ForeColor = $colorOrange
+                    }
+                    else {
+                        $row.Cells["Alert"].Style.ForeColor = $colorDark
+                    }
+
+                    # Décocher la checkbox après action
+                    $row.Cells["Select"].Value = $false
+
+                    break
+                }
+            }
+
+            # Mettre à jour les stats (léger, pas de rebuild)
+            Update-StatsLabel
+
+            Write-Log -Level "SUCCESS" -Action "SHARED_AUDIT" -UPN $UserId -Message "Données rafraîchies (in-place)."
         }
         catch {
             Write-Log -Level "ERROR" -Action "SHARED_AUDIT" -UPN $UserId -Message "Erreur rafraîchissement : $($_.Exception.Message)"
+        }
+    }
+
+    # --- Collecte des BAL cochées ou sélectionnées (union checkbox + sélection DGV) ---
+    function Get-SelectedMailboxes {
+        <#
+        .SYNOPSIS
+            Retourne la liste des BAL sélectionnées pour l'action.
+            Priorité : les lignes cochées (checkbox). Si aucune cochée,
+            fallback sur les lignes sélectionnées (highlight bleu Ctrl/Shift).
+            Ne retourne que les comptes actifs (AccountEnabled = $true).
+        #>
+
+        $selectedIds = [System.Collections.Generic.HashSet[string]]::new()
+        $results = @()
+
+        # 1) Collecter les lignes cochées
+        foreach ($row in $dgv.Rows) {
+            if ($row.Cells["Select"].Value -eq $true) {
+                $uid = $row.Cells["UserId"].Value
+                if ($uid -and $selectedIds.Add($uid)) {
+                    # Chercher l'objet dans FilteredData
+                    $item = $script:FilteredData | Where-Object { $_.UserId -eq $uid } | Select-Object -First 1
+                    if ($item) { $results += $item }
+                }
+            }
+        }
+
+        # 2) Si aucune cochée, prendre les lignes sélectionnées (highlight)
+        if ($results.Count -eq 0 -and $dgv.SelectedRows.Count -gt 0) {
+            foreach ($row in $dgv.SelectedRows) {
+                $uid = $row.Cells["UserId"].Value
+                if ($uid -and $selectedIds.Add($uid)) {
+                    $item = $script:FilteredData | Where-Object { $_.UserId -eq $uid } | Select-Object -First 1
+                    if ($item) { $results += $item }
+                }
+            }
+        }
+
+        # Filtrer : ne garder que les comptes actifs
+        $activeOnly = $results | Where-Object { $_.AccountEnabled -eq $true }
+        return @($activeOnly)
+    }
+
+    # --- Mise à jour de l'affichage du panneau d'actions selon la sélection ---
+    function Update-SelectionInfo {
+        <#
+        .SYNOPSIS
+            Met à jour le label d'information et les boutons d'actions
+            en fonction de la sélection courante (checkbox ou highlight).
+        #>
+
+        $selected = Get-SelectedMailboxes
+        $totalSelected = $selected.Count
+
+        if ($totalSelected -eq 0) {
+            # Vérifier s'il y a au moins une sélection (même inactive)
+            $allSelected = @()
+            foreach ($row in $dgv.Rows) {
+                if ($row.Cells["Select"].Value -eq $true) { $allSelected += $row }
+            }
+            if ($allSelected.Count -eq 0 -and $dgv.SelectedRows.Count -gt 0) {
+                $allSelected = $dgv.SelectedRows
+            }
+
+            if ($allSelected.Count -gt 0) {
+                # Des lignes sont sélectionnées mais aucune n'est active
+                $lblSelectedInfo.Text = Get-Text "shared_mailbox_audit.selected_all_disabled"
+                $lblSignInWarning.Text = ""
+                $btnDisable.Enabled = $false
+                $btnRefreshRow.Enabled = $true
+            }
+            else {
+                $lblSelectedInfo.Text = Get-Text "shared_mailbox_audit.no_selection"
+                $lblSignInWarning.Text = ""
+                $btnDisable.Enabled = $false
+                $btnRefreshRow.Enabled = $false
+            }
+            return
+        }
+
+        $btnRefreshRow.Enabled = $true
+
+        if ($totalSelected -eq 1) {
+            # Sélection simple — afficher les détails
+            $item = $selected[0]
+            $statusStr = if ($item.AccountEnabled) {
+                Get-Text "shared_mailbox_audit.status_active"
+            } else {
+                Get-Text "shared_mailbox_audit.status_disabled"
+            }
+
+            $licStr = if ([string]::IsNullOrWhiteSpace($item.LicenseNames)) {
+                Get-Text "shared_mailbox_audit.no_license"
+            } else {
+                $item.LicenseNames
+            }
+
+            $lblSelectedInfo.Text = Get-Text "shared_mailbox_audit.selected_info" $item.DisplayName $item.UPN $statusStr $licStr
+
+            # Avertissement sign-in
+            if ($item.HasInteractiveSignIn) {
+                $lblSignInWarning.Text = Get-Text "shared_mailbox_audit.warning_signin" $item.LastInteractiveSignIn
+                $lblSignInWarning.ForeColor = $colorRed
+            }
+            else {
+                $lblSignInWarning.Text = Get-Text "shared_mailbox_audit.warning_no_signin"
+                $lblSignInWarning.ForeColor = $colorGreen
+            }
+
+            $btnDisable.Text = Get-Text "shared_mailbox_audit.btn_disable"
+            $btnDisable.Enabled = $true
+        }
+        else {
+            # Multi-sélection — afficher le compteur
+            $withSignIn = ($selected | Where-Object { $_.HasInteractiveSignIn -eq $true }).Count
+
+            $lblSelectedInfo.Text = Get-Text "shared_mailbox_audit.selected_multi" $totalSelected
+
+            if ($withSignIn -gt 0) {
+                $lblSignInWarning.Text = Get-Text "shared_mailbox_audit.warning_multi_signin" $withSignIn
+                $lblSignInWarning.ForeColor = $colorRed
+            }
+            else {
+                $lblSignInWarning.Text = Get-Text "shared_mailbox_audit.warning_no_signin"
+                $lblSignInWarning.ForeColor = $colorGreen
+            }
+
+            $btnDisable.Text = Get-Text "shared_mailbox_audit.btn_disable_multi" $totalSelected
+            $btnDisable.Enabled = $true
         }
     }
 
@@ -872,6 +1067,7 @@ function Show-SharedMailboxAuditForm {
         $btnLoad.Enabled = $false
         $btnLoad.Text = Get-Text "shared_mailbox_audit.loading"
         $progressBar.Visible = $true
+        $progressBar.Style = "Marquee"
         $dgv.Rows.Clear()
         $lblStats.Text = Get-Text "shared_mailbox_audit.loading"
         $lblStats.ForeColor = $colorGray
@@ -912,124 +1108,162 @@ function Show-SharedMailboxAuditForm {
     $cboFilterLicense.Add_SelectedIndexChanged($filterAction)
     $cboFilterSignIn.Add_SelectedIndexChanged($filterAction)
 
-    # --- Sélection d'une ligne dans le DataGridView ---
+    # --- Sélection d'une ligne dans le DataGridView (highlight Ctrl/Shift) ---
     $dgv.Add_SelectionChanged({
-        if ($dgv.SelectedRows.Count -eq 0) {
-            $script:SelectedMailbox = $null
-            $btnDisable.Enabled = $false
-            $btnRefreshRow.Enabled = $false
-            $lblSelectedInfo.Text = Get-Text "shared_mailbox_audit.no_selection"
-            $lblSignInWarning.Text = ""
-            return
-        }
+        Update-SelectionInfo
+    })
 
-        $row = $dgv.SelectedRows[0]
-        $userId = $row.Cells["UserId"].Value
-        $displayName = $row.Cells["DisplayName"].Value
-        $upn = $row.Cells["UPN"].Value
-
-        # Retrouver l'objet dans les données filtrées
-        $script:SelectedMailbox = $script:FilteredData | Where-Object { $_.UserId -eq $userId } | Select-Object -First 1
-
-        if ($null -ne $script:SelectedMailbox) {
-            $statusStr = if ($script:SelectedMailbox.AccountEnabled) {
-                Get-Text "shared_mailbox_audit.status_active"
-            }
-            else {
-                Get-Text "shared_mailbox_audit.status_disabled"
-            }
-
-            $licStr = if ([string]::IsNullOrWhiteSpace($script:SelectedMailbox.LicenseNames)) {
-                Get-Text "shared_mailbox_audit.no_license"
-            }
-            else {
-                $script:SelectedMailbox.LicenseNames
-            }
-
-            $lblSelectedInfo.Text = Get-Text "shared_mailbox_audit.selected_info" $displayName $upn $statusStr $licStr
-
-            # Avertissement sign-in
-            if ($script:SelectedMailbox.HasInteractiveSignIn) {
-                $lblSignInWarning.Text = Get-Text "shared_mailbox_audit.warning_signin" $script:SelectedMailbox.LastInteractiveSignIn
-                $lblSignInWarning.ForeColor = $colorRed
-            }
-            else {
-                $lblSignInWarning.Text = Get-Text "shared_mailbox_audit.warning_no_signin"
-                $lblSignInWarning.ForeColor = $colorGreen
-            }
-
-            # Activer le bouton désactiver seulement si le compte est actif
-            $btnDisable.Enabled = $script:SelectedMailbox.AccountEnabled
-            $btnRefreshRow.Enabled = $true
+    # --- Clic sur une checkbox → mettre à jour le panneau d'actions ---
+    $dgv.Add_CellContentClick({
+        param($sender, $e)
+        # Vérifier que c'est la colonne checkbox (index 0)
+        if ($e.ColumnIndex -eq 0 -and $e.RowIndex -ge 0) {
+            # Forcer le commit de la valeur éditée avant lecture
+            $dgv.CommitEdit([System.Windows.Forms.DataGridViewDataErrorContexts]::Commit)
+            Update-SelectionInfo
         }
     })
 
-    # --- Clic sur Désactiver ---
+    # --- Clic sur Désactiver (supporte multi-sélection) ---
     $btnDisable.Add_Click({
-        if ($null -eq $script:SelectedMailbox) { return }
+        $targets = Get-SelectedMailboxes
+        if ($targets.Count -eq 0) { return }
 
-        $displayName = $script:SelectedMailbox.DisplayName
-        $upn = $script:SelectedMailbox.UPN
-        $userId = $script:SelectedMailbox.UserId
-
-        # Avertissement renforcé si un sign-in interactif a été détecté
+        # ── Étape 1 : Construire le message de confirmation ──
         $confirmMsg = ""
-        if ($script:SelectedMailbox.HasInteractiveSignIn) {
-            $confirmMsg = Get-Text "shared_mailbox_audit.confirm_disable_signin" $displayName $upn $script:SelectedMailbox.LastInteractiveSignIn
+        $withSignIn = ($targets | Where-Object { $_.HasInteractiveSignIn -eq $true }).Count
+
+        if ($targets.Count -eq 1) {
+            # Désactivation simple — message détaillé
+            $item = $targets[0]
+            if ($item.HasInteractiveSignIn) {
+                $confirmMsg = Get-Text "shared_mailbox_audit.confirm_disable_signin" $item.DisplayName $item.UPN $item.LastInteractiveSignIn
+            }
+            else {
+                $confirmMsg = Get-Text "shared_mailbox_audit.confirm_disable" $item.DisplayName $item.UPN
+            }
         }
         else {
-            $confirmMsg = Get-Text "shared_mailbox_audit.confirm_disable" $displayName $upn
+            # Désactivation groupée — liste résumée
+            $nameList = ($targets | ForEach-Object { "  • $($_.DisplayName) ($($_.UPN))" }) -join "`n"
+            if ($withSignIn -gt 0) {
+                $confirmMsg = Get-Text "shared_mailbox_audit.confirm_disable_multi_signin" $targets.Count $withSignIn $nameList
+            }
+            else {
+                $confirmMsg = Get-Text "shared_mailbox_audit.confirm_disable_multi" $targets.Count $nameList
+            }
         }
 
+        # ── Étape 2 : Dialogue de confirmation ──
         $confirm = Show-ConfirmDialog -Titre (Get-Text "shared_mailbox_audit.confirm_disable_title") -Message $confirmMsg
         if (-not $confirm) { return }
 
-        Write-Log -Level "INFO" -Action "SHARED_AUDIT" -UPN $upn -Message "Désactivation du compte utilisateur lié à la BAL partagée."
-
+        # ── Étape 3 : Désactivation avec progress bar ──
         $btnDisable.Enabled = $false
-        $btnDisable.Text = Get-Text "shared_mailbox_audit.disabling"
-        [System.Windows.Forms.Application]::DoEvents()
+        $btnRefreshRow.Enabled = $false
+        $btnLoad.Enabled = $false
+        $progressBar.Visible = $true
+        $progressBar.Style = "Continuous"
+        $progressBar.Minimum = 0
+        $progressBar.Maximum = $targets.Count
+        $progressBar.Value = 0
 
-        try {
-            # Utilisation du wrapper existant de GraphAPI.ps1
-            $result = Disable-AzUser -UserId $userId
+        $successCount = 0
+        $errorCount = 0
+        $errorDetails = @()
 
-            if ($result.Success) {
-                Write-Log -Level "SUCCESS" -Action "SHARED_AUDIT" -UPN $upn -Message "Compte désactivé avec succès."
-                Show-ResultDialog -Titre (Get-Text "shared_mailbox_audit.disable_success_title") -Message (Get-Text "shared_mailbox_audit.disable_success_msg" $displayName) -IsSuccess $true
+        for ($idx = 0; $idx -lt $targets.Count; $idx++) {
+            $item = $targets[$idx]
 
-                # Rafraîchir la ligne
-                Update-SingleRow -UserId $userId
+            # Mise à jour du texte du bouton avec progression
+            $btnDisable.Text = Get-Text "shared_mailbox_audit.disabling_progress" ($idx + 1) $targets.Count
+            [System.Windows.Forms.Application]::DoEvents()
+
+            Write-Log -Level "INFO" -Action "SHARED_AUDIT" -UPN $item.UPN -Message "Désactivation du compte utilisateur lié à la BAL partagée."
+
+            try {
+                $result = Disable-AzUser -UserId $item.UserId
+
+                if ($result.Success) {
+                    $successCount++
+                    Write-Log -Level "SUCCESS" -Action "SHARED_AUDIT" -UPN $item.UPN -Message "Compte désactivé avec succès."
+
+                    # Rafraîchir la ligne in-place (pas de rebuild)
+                    Update-SingleRowInPlace -UserId $item.UserId
+                }
+                else {
+                    $errorCount++
+                    $errorDetails += "$($item.DisplayName) : $($result.Error)"
+                    Write-Log -Level "ERROR" -Action "SHARED_AUDIT" -UPN $item.UPN -Message "Échec désactivation : $($result.Error)"
+                }
             }
-            else {
-                Write-Log -Level "ERROR" -Action "SHARED_AUDIT" -UPN $upn -Message "Échec désactivation : $($result.Error)"
-                Show-ResultDialog -Titre (Get-Text "shared_mailbox_audit.error_title") -Message (Get-Text "shared_mailbox_audit.disable_error_msg" $result.Error) -IsSuccess $false
+            catch {
+                $errorCount++
+                $errorDetails += "$($item.DisplayName) : $($_.Exception.Message)"
+                Write-Log -Level "ERROR" -Action "SHARED_AUDIT" -UPN $item.UPN -Message "Exception désactivation : $($_.Exception.Message)"
             }
+
+            $progressBar.Value = $idx + 1
+            [System.Windows.Forms.Application]::DoEvents()
         }
-        catch {
-            Write-Log -Level "ERROR" -Action "SHARED_AUDIT" -UPN $upn -Message "Exception désactivation : $($_.Exception.Message)"
-            Show-ResultDialog -Titre (Get-Text "shared_mailbox_audit.error_title") -Message (Get-Text "shared_mailbox_audit.disable_error_msg" $_.Exception.Message) -IsSuccess $false
+
+        # ── Étape 4 : Résultat final ──
+        $progressBar.Visible = $false
+        $btnLoad.Enabled = $true
+
+        if ($errorCount -eq 0) {
+            Show-ResultDialog `
+                -Titre (Get-Text "shared_mailbox_audit.disable_success_title") `
+                -Message (Get-Text "shared_mailbox_audit.disable_batch_success" $successCount) `
+                -IsSuccess $true
         }
-        finally {
-            $btnDisable.Text = Get-Text "shared_mailbox_audit.btn_disable"
-            if ($null -ne $script:SelectedMailbox -and $script:SelectedMailbox.AccountEnabled) {
-                $btnDisable.Enabled = $true
-            }
+        else {
+            $errSummary = ($errorDetails -join "`n")
+            Show-ResultDialog `
+                -Titre (Get-Text "shared_mailbox_audit.error_title") `
+                -Message (Get-Text "shared_mailbox_audit.disable_batch_partial" $successCount $errorCount $errSummary) `
+                -IsSuccess $false
         }
+
+        # Restaurer le texte du bouton et réévaluer la sélection
+        $btnDisable.Text = Get-Text "shared_mailbox_audit.btn_disable"
+        Update-SelectionInfo
     })
 
     # --- Clic sur Rafraîchir la sélection ---
     $btnRefreshRow.Add_Click({
-        if ($null -eq $script:SelectedMailbox) { return }
+        $targets = Get-SelectedMailboxes
+        # Si aucune cible active, rafraîchir toutes les lignes sélectionnées/cochées
+        if ($targets.Count -eq 0) {
+            $targets = @()
+            foreach ($row in $dgv.Rows) {
+                if ($row.Cells["Select"].Value -eq $true) {
+                    $uid = $row.Cells["UserId"].Value
+                    $item = $script:FilteredData | Where-Object { $_.UserId -eq $uid } | Select-Object -First 1
+                    if ($item) { $targets += $item }
+                }
+            }
+            if ($targets.Count -eq 0 -and $dgv.SelectedRows.Count -gt 0) {
+                foreach ($row in $dgv.SelectedRows) {
+                    $uid = $row.Cells["UserId"].Value
+                    $item = $script:FilteredData | Where-Object { $_.UserId -eq $uid } | Select-Object -First 1
+                    if ($item) { $targets += $item }
+                }
+            }
+        }
+        if ($targets.Count -eq 0) { return }
 
         $btnRefreshRow.Enabled = $false
         $btnRefreshRow.Text = Get-Text "shared_mailbox_audit.refreshing"
         [System.Windows.Forms.Application]::DoEvents()
 
-        Update-SingleRow -UserId $script:SelectedMailbox.UserId
+        foreach ($item in $targets) {
+            Update-SingleRowInPlace -UserId $item.UserId
+        }
 
         $btnRefreshRow.Text = Get-Text "shared_mailbox_audit.btn_refresh_row"
         $btnRefreshRow.Enabled = $true
+        Update-SelectionInfo
     })
 
     # --- Clic sur Exporter CSV ---

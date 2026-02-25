@@ -475,7 +475,7 @@ function Show-NestedGroupAuditForm {
     $panelCreateUser.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
     $panelCreateUser.ForeColor = $colorBlue
     $panelCreateUser.Location = New-Object System.Drawing.Point(15, 55)
-    $panelCreateUser.Size = New-Object System.Drawing.Size(610, 200)
+    $panelCreateUser.Size = New-Object System.Drawing.Size(610, 240)
     $tab4.Controls.Add($panelCreateUser)
 
     $lblUserGroupName = New-Object System.Windows.Forms.Label
@@ -514,10 +514,30 @@ function Show-NestedGroupAuditForm {
     $lblUserCount.Size = New-Object System.Drawing.Size(400, 20)
     $panelCreateUser.Controls.Add($lblUserCount)
 
+    # Checkbox : supprimer les users du groupe d'origine après transfert
+    $chkRemoveUsersFromOrigin = New-Object System.Windows.Forms.CheckBox
+    $chkRemoveUsersFromOrigin.Text = Get-Text "nested_group_audit.chk_remove_from_origin"
+    $chkRemoveUsersFromOrigin.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $chkRemoveUsersFromOrigin.ForeColor = $colorDark
+    $chkRemoveUsersFromOrigin.Location = New-Object System.Drawing.Point(15, 140)
+    $chkRemoveUsersFromOrigin.Size = New-Object System.Drawing.Size(580, 20)
+    $chkRemoveUsersFromOrigin.Checked = $true
+    $panelCreateUser.Controls.Add($chkRemoveUsersFromOrigin)
+
+    # Checkbox : renommer le groupe d'origine en _Device
+    $chkRenameOriginForUser = New-Object System.Windows.Forms.CheckBox
+    $chkRenameOriginForUser.Text = Get-Text "nested_group_audit.chk_rename_origin_device"
+    $chkRenameOriginForUser.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $chkRenameOriginForUser.ForeColor = $colorDark
+    $chkRenameOriginForUser.Location = New-Object System.Drawing.Point(15, 163)
+    $chkRenameOriginForUser.Size = New-Object System.Drawing.Size(580, 20)
+    $chkRenameOriginForUser.Checked = $true
+    $panelCreateUser.Controls.Add($chkRenameOriginForUser)
+
     $btnCreateUserGroup = New-Object System.Windows.Forms.Button
     $btnCreateUserGroup.Text = Get-Text "nested_group_audit.btn_create_group"
     $btnCreateUserGroup.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-    $btnCreateUserGroup.Location = New-Object System.Drawing.Point(170, 145)
+    $btnCreateUserGroup.Location = New-Object System.Drawing.Point(170, 190)
     $btnCreateUserGroup.Size = New-Object System.Drawing.Size(420, 38)
     $btnCreateUserGroup.BackColor = $colorBlue
     $btnCreateUserGroup.ForeColor = $colorWhite
@@ -532,7 +552,7 @@ function Show-NestedGroupAuditForm {
     $panelCreateDevice.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
     $panelCreateDevice.ForeColor = $colorOrange
     $panelCreateDevice.Location = New-Object System.Drawing.Point(645, 55)
-    $panelCreateDevice.Size = New-Object System.Drawing.Size(610, 200)
+    $panelCreateDevice.Size = New-Object System.Drawing.Size(610, 240)
     $tab4.Controls.Add($panelCreateDevice)
 
     $lblDeviceGroupName = New-Object System.Windows.Forms.Label
@@ -571,10 +591,30 @@ function Show-NestedGroupAuditForm {
     $lblDeviceCount.Size = New-Object System.Drawing.Size(400, 20)
     $panelCreateDevice.Controls.Add($lblDeviceCount)
 
+    # Checkbox : supprimer les devices du groupe d'origine après transfert
+    $chkRemoveDevicesFromOrigin = New-Object System.Windows.Forms.CheckBox
+    $chkRemoveDevicesFromOrigin.Text = Get-Text "nested_group_audit.chk_remove_from_origin"
+    $chkRemoveDevicesFromOrigin.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $chkRemoveDevicesFromOrigin.ForeColor = $colorDark
+    $chkRemoveDevicesFromOrigin.Location = New-Object System.Drawing.Point(15, 140)
+    $chkRemoveDevicesFromOrigin.Size = New-Object System.Drawing.Size(580, 20)
+    $chkRemoveDevicesFromOrigin.Checked = $true
+    $panelCreateDevice.Controls.Add($chkRemoveDevicesFromOrigin)
+
+    # Checkbox : renommer le groupe d'origine en _User
+    $chkRenameOriginForDevice = New-Object System.Windows.Forms.CheckBox
+    $chkRenameOriginForDevice.Text = Get-Text "nested_group_audit.chk_rename_origin_user"
+    $chkRenameOriginForDevice.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $chkRenameOriginForDevice.ForeColor = $colorDark
+    $chkRenameOriginForDevice.Location = New-Object System.Drawing.Point(15, 163)
+    $chkRenameOriginForDevice.Size = New-Object System.Drawing.Size(580, 20)
+    $chkRenameOriginForDevice.Checked = $true
+    $panelCreateDevice.Controls.Add($chkRenameOriginForDevice)
+
     $btnCreateDeviceGroup = New-Object System.Windows.Forms.Button
     $btnCreateDeviceGroup.Text = Get-Text "nested_group_audit.btn_create_group"
     $btnCreateDeviceGroup.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-    $btnCreateDeviceGroup.Location = New-Object System.Drawing.Point(170, 145)
+    $btnCreateDeviceGroup.Location = New-Object System.Drawing.Point(170, 190)
     $btnCreateDeviceGroup.Size = New-Object System.Drawing.Size(420, 38)
     $btnCreateDeviceGroup.BackColor = $colorOrange
     $btnCreateDeviceGroup.ForeColor = $colorWhite
@@ -588,14 +628,14 @@ function Show-NestedGroupAuditForm {
     $lblActionsLog.Text = Get-Text "nested_group_audit.lbl_actions_log"
     $lblActionsLog.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
     $lblActionsLog.ForeColor = $colorDark
-    $lblActionsLog.Location = New-Object System.Drawing.Point(15, 270)
+    $lblActionsLog.Location = New-Object System.Drawing.Point(15, 310)
     $lblActionsLog.Size = New-Object System.Drawing.Size(300, 22)
     $tab4.Controls.Add($lblActionsLog)
 
     $txtActionsLog = New-Object System.Windows.Forms.TextBox
     $txtActionsLog.Font = New-Object System.Drawing.Font("Consolas", 9)
-    $txtActionsLog.Location = New-Object System.Drawing.Point(15, 298)
-    $txtActionsLog.Size = New-Object System.Drawing.Size(1240, 360)
+    $txtActionsLog.Location = New-Object System.Drawing.Point(15, 338)
+    $txtActionsLog.Size = New-Object System.Drawing.Size(1240, 320)
     $txtActionsLog.Multiline = $true
     $txtActionsLog.ScrollBars = "Vertical"
     $txtActionsLog.ReadOnly = $true
@@ -975,6 +1015,71 @@ function Show-NestedGroupAuditForm {
         }
     }
 
+    # --- Fonction : renommer un groupe Entra ID ---
+    function Rename-EntraGroup {
+        param(
+            [string]$GroupId,
+            [string]$NewDisplayName
+        )
+
+        try {
+            Write-ActionLog ((Get-Text "nested_group_audit.log_renaming_group") -f $NewDisplayName)
+
+            $updateBody = @{
+                displayName  = $NewDisplayName
+                mailNickname = ($NewDisplayName -replace '[^a-zA-Z0-9]', '')
+            }
+
+            Update-MgGroup -GroupId $GroupId -BodyParameter $updateBody -ErrorAction Stop
+
+            Write-Log -Level "SUCCESS" -Action "NESTED_AUDIT" -Message "Groupe '$GroupId' renommé en '$NewDisplayName'."
+            Write-ActionLog ((Get-Text "nested_group_audit.log_rename_success") -f $NewDisplayName)
+            return $true
+        }
+        catch {
+            $errMsg = $_.Exception.Message
+            Write-Log -Level "ERROR" -Action "NESTED_AUDIT" -Message "Erreur renommage groupe '$GroupId' en '$NewDisplayName' : $errMsg"
+            Write-ActionLog ((Get-Text "nested_group_audit.log_rename_error") -f $NewDisplayName, $errMsg)
+            return $false
+        }
+    }
+
+    # --- Fonction : supprimer des membres du groupe d'origine après transfert ---
+    function Remove-MembersFromSourceGroup {
+        param(
+            [string]$GroupId,
+            [string]$GroupName,
+            [array]$MemberIds,
+            [string]$MemberType  # "User" ou "Device"
+        )
+
+        Write-ActionLog ((Get-Text "nested_group_audit.log_removing_members") -f $MemberIds.Count, $GroupName)
+        $removedCount = 0
+        $errorCount = 0
+
+        foreach ($memberId in $MemberIds) {
+            try {
+                Remove-MgGroupMemberByRef -GroupId $GroupId -DirectoryObjectId $memberId -ErrorAction Stop
+                $removedCount++
+            }
+            catch {
+                $errorCount++
+                Write-Log -Level "WARNING" -Action "NESTED_AUDIT" -Message "Erreur suppression membre $memberId du groupe $GroupName : $($_.Exception.Message)"
+            }
+
+            # Mise à jour visuelle tous les 10 membres
+            if ($removedCount % 10 -eq 0 -and $removedCount -gt 0) {
+                Write-ActionLog ((Get-Text "nested_group_audit.log_remove_progress") -f $removedCount, $MemberIds.Count)
+                [System.Windows.Forms.Application]::DoEvents()
+            }
+        }
+
+        Write-ActionLog ((Get-Text "nested_group_audit.log_remove_complete") -f $removedCount, $MemberIds.Count, $errorCount)
+        Write-Log -Level "SUCCESS" -Action "NESTED_AUDIT" -Message "Suppression depuis '$GroupName' : $removedCount/$($MemberIds.Count) $MemberType(s) retirés, $errorCount erreur(s)."
+
+        return [PSCustomObject]@{ Removed = $removedCount; Errors = $errorCount }
+    }
+
     # --- Fonction : filtrer le DataGridView des groupes ---
     function Update-GroupsFilter {
         $filterText = $txtFilter.Text.Trim().ToLower()
@@ -1205,16 +1310,48 @@ function Show-NestedGroupAuditForm {
             return
         }
 
-        $confirmMsg = (Get-Text "nested_group_audit.confirm_create_user") -f $groupName, $script:SelectedGroupMembers.Users.Count
+        # Construire le message de confirmation dynamique selon les options
+        $optionLines = ""
+        if ($chkRemoveUsersFromOrigin.Checked) {
+            $optionLines += "`n" + (Get-Text "nested_group_audit.confirm_option_remove")
+        }
+        if ($chkRenameOriginForUser.Checked) {
+            $renameTarget = "$($script:SelectedGroup.DisplayName)_Device"
+            $optionLines += "`n" + ((Get-Text "nested_group_audit.confirm_option_rename") -f $script:SelectedGroup.DisplayName, $renameTarget)
+        }
+
+        $confirmMsg = (Get-Text "nested_group_audit.confirm_create_user_v2") -f $groupName, $script:SelectedGroupMembers.Users.Count, $optionLines
         $confirmed = Show-ConfirmDialog -Titre (Get-Text "nested_group_audit.confirm_title") -Message $confirmMsg
         if (-not $confirmed) { return }
 
         $btnCreateUserGroup.Enabled = $false
         $memberIds = $script:SelectedGroupMembers.Users | ForEach-Object { $_.Id }
+
+        # Étape 1 : Créer le nouveau groupe et transférer les users
         $result = New-SecurityGroupWithMembers -GroupName $groupName -Description $txtUserGroupDesc.Text -MemberIds $memberIds -MemberType "User"
 
         if ($result.Success) {
-            Show-ResultDialog -Titre (Get-Text "nested_group_audit.success_title") -Message ((Get-Text "nested_group_audit.success_create_group") -f $groupName, $result.Added, $result.Errors) -IsSuccess $true
+            # Étape 2 : Supprimer les users du groupe d'origine si coché
+            if ($chkRemoveUsersFromOrigin.Checked) {
+                $removeResult = Remove-MembersFromSourceGroup -GroupId $script:SelectedGroup.GroupId -GroupName $script:SelectedGroup.DisplayName -MemberIds $memberIds -MemberType "User"
+            }
+
+            # Étape 3 : Renommer le groupe d'origine en _Device si coché
+            if ($chkRenameOriginForUser.Checked) {
+                $newOriginName = "$($script:SelectedGroup.DisplayName)_Device"
+                Rename-EntraGroup -GroupId $script:SelectedGroup.GroupId -NewDisplayName $newOriginName
+            }
+
+            # Message de succès récapitulatif
+            $successMsg = (Get-Text "nested_group_audit.success_create_group") -f $groupName, $result.Added, $result.Errors
+            if ($chkRemoveUsersFromOrigin.Checked -and $removeResult) {
+                $successMsg += "`n" + ((Get-Text "nested_group_audit.success_removed_members") -f $removeResult.Removed, $removeResult.Errors)
+            }
+            if ($chkRenameOriginForUser.Checked) {
+                $successMsg += "`n" + ((Get-Text "nested_group_audit.success_renamed_group") -f $newOriginName)
+            }
+
+            Show-ResultDialog -Titre (Get-Text "nested_group_audit.success_title") -Message $successMsg -IsSuccess $true
         }
         else {
             Show-ResultDialog -Titre (Get-Text "nested_group_audit.error_title") -Message (Get-Text "nested_group_audit.error_create_group") -IsSuccess $false
@@ -1233,16 +1370,48 @@ function Show-NestedGroupAuditForm {
             return
         }
 
-        $confirmMsg = (Get-Text "nested_group_audit.confirm_create_device") -f $groupName, $script:SelectedGroupMembers.Devices.Count
+        # Construire le message de confirmation dynamique selon les options
+        $optionLines = ""
+        if ($chkRemoveDevicesFromOrigin.Checked) {
+            $optionLines += "`n" + (Get-Text "nested_group_audit.confirm_option_remove")
+        }
+        if ($chkRenameOriginForDevice.Checked) {
+            $renameTarget = "$($script:SelectedGroup.DisplayName)_User"
+            $optionLines += "`n" + ((Get-Text "nested_group_audit.confirm_option_rename") -f $script:SelectedGroup.DisplayName, $renameTarget)
+        }
+
+        $confirmMsg = (Get-Text "nested_group_audit.confirm_create_device_v2") -f $groupName, $script:SelectedGroupMembers.Devices.Count, $optionLines
         $confirmed = Show-ConfirmDialog -Titre (Get-Text "nested_group_audit.confirm_title") -Message $confirmMsg
         if (-not $confirmed) { return }
 
         $btnCreateDeviceGroup.Enabled = $false
         $memberIds = $script:SelectedGroupMembers.Devices | ForEach-Object { $_.Id }
+
+        # Étape 1 : Créer le nouveau groupe et transférer les devices
         $result = New-SecurityGroupWithMembers -GroupName $groupName -Description $txtDeviceGroupDesc.Text -MemberIds $memberIds -MemberType "Device"
 
         if ($result.Success) {
-            Show-ResultDialog -Titre (Get-Text "nested_group_audit.success_title") -Message ((Get-Text "nested_group_audit.success_create_group") -f $groupName, $result.Added, $result.Errors) -IsSuccess $true
+            # Étape 2 : Supprimer les devices du groupe d'origine si coché
+            if ($chkRemoveDevicesFromOrigin.Checked) {
+                $removeResult = Remove-MembersFromSourceGroup -GroupId $script:SelectedGroup.GroupId -GroupName $script:SelectedGroup.DisplayName -MemberIds $memberIds -MemberType "Device"
+            }
+
+            # Étape 3 : Renommer le groupe d'origine en _User si coché
+            if ($chkRenameOriginForDevice.Checked) {
+                $newOriginName = "$($script:SelectedGroup.DisplayName)_User"
+                Rename-EntraGroup -GroupId $script:SelectedGroup.GroupId -NewDisplayName $newOriginName
+            }
+
+            # Message de succès récapitulatif
+            $successMsg = (Get-Text "nested_group_audit.success_create_group") -f $groupName, $result.Added, $result.Errors
+            if ($chkRemoveDevicesFromOrigin.Checked -and $removeResult) {
+                $successMsg += "`n" + ((Get-Text "nested_group_audit.success_removed_members") -f $removeResult.Removed, $removeResult.Errors)
+            }
+            if ($chkRenameOriginForDevice.Checked) {
+                $successMsg += "`n" + ((Get-Text "nested_group_audit.success_renamed_group") -f $newOriginName)
+            }
+
+            Show-ResultDialog -Titre (Get-Text "nested_group_audit.success_title") -Message $successMsg -IsSuccess $true
         }
         else {
             Show-ResultDialog -Titre (Get-Text "nested_group_audit.error_title") -Message (Get-Text "nested_group_audit.error_create_group") -IsSuccess $false
