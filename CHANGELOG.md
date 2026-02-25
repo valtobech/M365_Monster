@@ -6,6 +6,32 @@ Versioning selon [Semantic Versioning](https://semver.org/lang/fr/).
 
 ---
 
+## [0.1.6] — 2026-02-25
+
+### Corrigé
+
+**Audit Shared Mailbox — Performance et throttling Graph API**
+
+- **Chargement initial très lent (~6 min pour 63 BAL)** : l'enrichissement Graph via `$batch` avec `signInActivity` déclenchait un throttling massif (429 Too Many Requests). Chaque batch de 20 sous-requêtes prenait ~80 secondes à cause du coût interne de `signInActivity` côté Microsoft.
+- **Erreurs 429 fréquentes au rechargement** : les appels Graph saturaient le quota API du tenant, provoquant des rejets en cascade sur les batchs suivants.
+
+### Mis à jour
+
+**Audit Shared Mailbox — Réécriture de la stratégie d'enrichissement Graph (`GUI_SharedMailboxAudit.ps1`)**
+
+Architecture 2 passes séparées remplaçant le `$batch` monolithique :
+
+- **Passe 1 — Graph v1.0 `$filter`** : récupération des propriétés de base (`accountEnabled`, `assignedLicenses`, `mail`, etc.) via `GET /v1.0/users?$filter=id eq '...'&$select=...` par lots de 15 IDs. Requête de liste paginée sur v1.0, quasi instantanée, sans throttling.
+- **Passe 2 — Graph beta `$filter`** : récupération de `signInActivity` via `GET /beta/users?$filter=id eq '...'&$select=id,signInActivity` par lots de 15 IDs. Une seule requête HTTP par lot (au lieu de 20 sous-requêtes `$batch`), ce qui réduit drastiquement la pression sur le rate limiter Graph.
+- **Pré-chargement du cache SKU** : `Get-LicenseSkuNames` appelé avant le traitement des batchs (au lieu du lazy-load dans `Resolve-SkuName`).
+- **Retry avec backoff sur 429** : chaque requête `$filter` dispose d'un retry progressif (3 tentatives, backoff 5s/10s/15s) en cas de throttling résiduel.
+- **Throttle inter-lots** : pause de 300ms entre les lots `signInActivity` pour lisser la charge.
+- **Rafraîchissement individuel (`Update-SingleRowInPlace`)** : ajout d'un retry avec backoff (3 tentatives, 3s/6s/9s) sur les appels Graph unitaires lors du refresh d'une ligne.
+
+**Résultat** : chargement de 63 BAL en ~10 secondes (vs ~6 minutes), zéro erreur 429 en conditions normales.
+
+---
+
 ## [0.1.5] — 2026-02-25
 
 ### Ajouté

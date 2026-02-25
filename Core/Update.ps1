@@ -303,6 +303,9 @@ try {
     Get-ChildItem -Path `$sourceDir -Exclude 'Clients','Logs' | ForEach-Object {
         `$dest = Join-Path -Path `$rootPath -ChildPath `$_.Name
         if (`$_.PSIsContainer) {
+            # Supprimer le dossier existant avant la copie pour éviter
+            # le dédoublement (ex: Lang\Lang\) causé par Copy-Item -Recurse
+            if (Test-Path `$dest) { Remove-Item `$dest -Recurse -Force }
             Copy-Item -Path `$_.FullName -Destination `$dest -Recurse -Force
         }
         else {

@@ -559,10 +559,12 @@ function Show-SharedMailboxAuditForm {
             Récupère toutes les boîtes aux lettres partagées du tenant.
 
         .DESCRIPTION
-            Stratégie en 3 étapes :
-            1. Exchange Online : Get-EXOMailbox -RecipientTypeDetails SharedMailbox (rapide, ~5 sec)
-            2. Graph API beta : enrichir avec signInActivity + assignedLicenses par batch
-            3. Construction des objets résultat avec alertes via Build-MailboxResult
+            Stratégie optimisée en 4 étapes pour éviter le throttling Graph :
+            1. Exchange Online : Get-EXOMailbox -RecipientTypeDetails SharedMailbox (rapide, ~2 sec)
+            2. Graph API v1.0 : GET /users avec $filter + $select pour les propriétés de base
+               (id, displayName, upn, mail, accountEnabled, assignedLicenses) — une seule requête paginée
+            3. Graph API beta : $batch pour signInActivity uniquement (batch de 4, throttle adapté)
+            4. Construction des objets résultat avec alertes via Build-MailboxResult
         #>
 
         Write-Log -Level "INFO" -Action "SHARED_AUDIT" -Message "Début du chargement des Shared Mailbox."
@@ -587,17 +589,13 @@ function Show-SharedMailboxAuditForm {
                 return @()
             }
 
-            # ── ÉTAPE 3 : Enrichir avec Graph API $batch (signInActivity, licences, accountEnabled) ──
-            Write-Log -Level "INFO" -Action "SHARED_AUDIT" -Message "Enrichissement Graph API par batch (signInActivity, licences)..."
-
-            $sharedResults = @()
-            $batchSize = 20
-
             # Préparer la liste des BAL avec ObjectId valide
             $validMailboxes = @()
+            $exoLookup = @{}  # ObjectId → objet EXO (pour fallback PrimarySmtpAddress)
             foreach ($mbx in $exoMailboxes) {
                 if (-not [string]::IsNullOrWhiteSpace($mbx.ExternalDirectoryObjectId)) {
                     $validMailboxes += $mbx
+                    $exoLookup[$mbx.ExternalDirectoryObjectId] = $mbx
                 }
                 else {
                     Write-Log -Level "WARNING" -Action "SHARED_AUDIT" -UPN $mbx.UserPrincipalName -Message "Pas d'ExternalDirectoryObjectId — ignorée."
@@ -605,84 +603,145 @@ function Show-SharedMailboxAuditForm {
             }
 
             $totalValid = $validMailboxes.Count
-            Write-Log -Level "INFO" -Action "SHARED_AUDIT" -Message "$totalValid BAL à enrichir via Graph ($([Math]::Ceiling($totalValid / $batchSize)) batch(s) de $batchSize)."
+            Write-Log -Level "INFO" -Action "SHARED_AUDIT" -Message "$totalValid BAL à enrichir via Graph."
 
-            # Traiter par lots de 20
-            for ($i = 0; $i -lt $totalValid; $i += $batchSize) {
-                $batchEnd = [Math]::Min($i + $batchSize - 1, $totalValid - 1)
-                $currentBatch = $validMailboxes[$i..$batchEnd]
-                $batchNumber = [Math]::Floor($i / $batchSize) + 1
+            # Pré-charger le cache SKU licences (avant tout traitement)
+            $null = Get-LicenseSkuNames
 
-                # Construire le body $batch
-                $batchRequests = @()
-                $batchIndex = 0
-                foreach ($mbx in $currentBatch) {
-                    $batchRequests += @{
-                        id     = "$batchIndex"
-                        method = "GET"
-                        url    = "/users/$($mbx.ExternalDirectoryObjectId)?`$select=id,displayName,userPrincipalName,mail,accountEnabled,assignedLicenses,signInActivity"
-                        headers = @{ "ConsistencyLevel" = "eventual" }
-                    }
-                    $batchIndex++
-                }
+            # ── ÉTAPE 3 : Récupérer les propriétés de base via Graph v1.0 (requête par lots de IDs) ──
+            # On utilise $filter=id in (...) avec $select — un seul appel paginé, pas de throttle
+            Write-Log -Level "INFO" -Action "SHARED_AUDIT" -Message "Récupération des propriétés de base via Graph (requête groupée)..."
 
-                $batchBody = @{ requests = $batchRequests } | ConvertTo-Json -Depth 5 -Compress
+            $graphUserMap = @{}  # id → objet Graph user
+            $filterBatchSize = 15  # Max IDs par clause $filter (limite URL Graph ~2048 chars)
+
+            for ($i = 0; $i -lt $totalValid; $i += $filterBatchSize) {
+                $batchEnd = [Math]::Min($i + $filterBatchSize - 1, $totalValid - 1)
+                $currentSlice = $validMailboxes[$i..$batchEnd]
+
+                # Construire le filtre : id eq 'xxx' or id eq 'yyy'
+                $filterClauses = ($currentSlice | ForEach-Object {
+                    "id eq '$($_.ExternalDirectoryObjectId)'"
+                }) -join " or "
+
+                $selectFields = "id,displayName,userPrincipalName,mail,accountEnabled,assignedLicenses"
+                $uri = "https://graph.microsoft.com/v1.0/users?`$filter=$filterClauses&`$select=$selectFields&`$top=999"
+                $headers = @{ "ConsistencyLevel" = "eventual" }
 
                 try {
-                    $batchResponse = Invoke-MgGraphRequest -Method POST `
-                        -Uri "https://graph.microsoft.com/beta/`$batch" `
-                        -Body $batchBody `
-                        -ContentType "application/json" `
-                        -ErrorAction Stop
+                    $response = Invoke-MgGraphRequest -Method GET -Uri $uri -Headers $headers -ErrorAction Stop
 
-                    # Traiter chaque réponse du batch
-                    foreach ($resp in $batchResponse.responses) {
-                        $idx = [int]$resp.id
-                        $mbx = $currentBatch[$idx]
-
-                        if ($resp.status -eq 200) {
-                            $sharedResults += Build-MailboxResult -GraphUser $resp.body -FallbackMail $mbx.PrimarySmtpAddress
-                        }
-                        else {
-                            # Réponse en erreur pour cet utilisateur — fallback EXO
-                            Write-Log -Level "WARNING" -Action "SHARED_AUDIT" -UPN $mbx.UserPrincipalName `
-                                -Message "Batch réponse $($resp.status) : $($resp.body.error.message)"
-
-                            $sharedResults += [PSCustomObject]@{
-                                UserId                = $mbx.ExternalDirectoryObjectId
-                                DisplayName           = $mbx.DisplayName
-                                UPN                   = $mbx.UserPrincipalName
-                                Mail                  = $mbx.PrimarySmtpAddress
-                                AccountEnabled        = $null
-                                LicenseNames          = ""
-                                HasLicense            = $false
-                                LastInteractiveSignIn = $null
-                                HasInteractiveSignIn  = $false
-                                Alert                 = Get-Text "shared_mailbox_audit.alert_graph_error"
-                            }
+                    if ($response.value) {
+                        foreach ($user in $response.value) {
+                            $graphUserMap[$user.id] = $user
                         }
                     }
                 }
                 catch {
-                    # Échec complet du batch — fallback EXO pour toutes les BAL du lot
-                    Write-Log -Level "WARNING" -Action "SHARED_AUDIT" -Message "Échec batch $batchNumber : $($_.Exception.Message)"
-                    foreach ($mbx in $currentBatch) {
-                        $sharedResults += [PSCustomObject]@{
-                            UserId                = $mbx.ExternalDirectoryObjectId
-                            DisplayName           = $mbx.DisplayName
-                            UPN                   = $mbx.UserPrincipalName
-                            Mail                  = $mbx.PrimarySmtpAddress
-                            AccountEnabled        = $null
-                            LicenseNames          = ""
-                            HasLicense            = $false
-                            LastInteractiveSignIn = $null
-                            HasInteractiveSignIn  = $false
-                            Alert                 = Get-Text "shared_mailbox_audit.alert_graph_error"
+                    Write-Log -Level "WARNING" -Action "SHARED_AUDIT" -Message "Erreur récupération base (lot $([Math]::Floor($i / $filterBatchSize) + 1)) : $($_.Exception.Message)"
+                }
+            }
+
+            Write-Log -Level "INFO" -Action "SHARED_AUDIT" -Message "$($graphUserMap.Count) / $totalValid utilisateurs récupérés via Graph v1.0."
+
+            # ── ÉTAPE 4 : Récupérer signInActivity via Graph beta $filter (requête de liste) ──
+            # Une seule requête HTTP par lot de 15 IDs — beaucoup moins de throttling
+            # qu'un $batch de N sous-requêtes individuelles
+            Write-Log -Level "INFO" -Action "SHARED_AUDIT" -Message "Récupération signInActivity via Graph beta (requête $filter)..."
+
+            $signInMap = @{}  # id → signInActivity object
+            $signInFilterSize = 15  # IDs par requête (limite URL ~2048 chars)
+            $maxRetries = 3
+            $signInLotCount = [Math]::Ceiling($totalValid / $signInFilterSize)
+
+            for ($i = 0; $i -lt $totalValid; $i += $signInFilterSize) {
+                $sliceEnd = [Math]::Min($i + $signInFilterSize - 1, $totalValid - 1)
+                $currentSlice = $validMailboxes[$i..$sliceEnd]
+                $lotNumber = [Math]::Floor($i / $signInFilterSize) + 1
+
+                # Construire le filtre : id eq 'xxx' or id eq 'yyy'
+                $filterClauses = ($currentSlice | ForEach-Object {
+                    "id eq '$($_.ExternalDirectoryObjectId)'"
+                }) -join " or "
+
+                $uri = "https://graph.microsoft.com/beta/users?`$filter=$filterClauses&`$select=id,signInActivity&`$top=999"
+                $headers = @{ "ConsistencyLevel" = "eventual" }
+
+                # Envoi avec retry sur 429
+                $response = $null
+                for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+                    try {
+                        $response = Invoke-MgGraphRequest -Method GET -Uri $uri -Headers $headers -ErrorAction Stop
+                        break
+                    }
+                    catch {
+                        $errMsg = $_.Exception.Message
+                        if ($errMsg -match "429|Too Many Requests|throttl" -and $attempt -lt $maxRetries) {
+                            # Tenter d'extraire Retry-After du message ou utiliser un backoff progressif
+                            $retryDelay = 5 * $attempt
+                            Write-Log -Level "WARNING" -Action "SHARED_AUDIT" -Message "SignIn lot $lotNumber — 429 (tentative $attempt/$maxRetries). Pause ${retryDelay}s..."
+                            Start-Sleep -Seconds $retryDelay
+                        }
+                        else {
+                            Write-Log -Level "WARNING" -Action "SHARED_AUDIT" -Message "Échec signIn lot $lotNumber : $errMsg"
+                            $response = $null
+                            break
                         }
                     }
                 }
 
-                Write-Log -Level "INFO" -Action "SHARED_AUDIT" -Message "Batch $batchNumber terminé ($($batchEnd + 1) / $totalValid BAL traitées)."
+                # Traiter les résultats
+                if ($response -and $response.value) {
+                    foreach ($user in $response.value) {
+                        if ($user.signInActivity) {
+                            $signInMap[$user.id] = $user.signInActivity
+                        }
+                    }
+                }
+
+                # Progression
+                if ($lotNumber % 3 -eq 0 -or $sliceEnd -eq ($totalValid - 1)) {
+                    Write-Log -Level "INFO" -Action "SHARED_AUDIT" -Message "SignIn lot $lotNumber/$signInLotCount terminé ($($sliceEnd + 1) / $totalValid BAL)."
+                }
+
+                # Petit throttle entre les lots
+                if ($sliceEnd -lt ($totalValid - 1)) {
+                    Start-Sleep -Milliseconds 300
+                }
+            }
+
+            Write-Log -Level "INFO" -Action "SHARED_AUDIT" -Message "$($signInMap.Count) signInActivity récupéré(s) sur $totalValid BAL."
+
+            # ── ÉTAPE 5 : Assembler les résultats ──
+            $sharedResults = @()
+
+            foreach ($mbx in $validMailboxes) {
+                $oid = $mbx.ExternalDirectoryObjectId
+                $graphUser = $graphUserMap[$oid]
+
+                if ($graphUser) {
+                    # Injecter signInActivity dans l'objet Graph si disponible
+                    if ($signInMap.ContainsKey($oid)) {
+                        $graphUser | Add-Member -NotePropertyName "signInActivity" -NotePropertyValue $signInMap[$oid] -Force
+                    }
+                    $sharedResults += Build-MailboxResult -GraphUser $graphUser -FallbackMail $mbx.PrimarySmtpAddress
+                }
+                else {
+                    # Aucune donnée Graph — fallback EXO
+                    Write-Log -Level "WARNING" -Action "SHARED_AUDIT" -UPN $mbx.UserPrincipalName -Message "Utilisateur absent de Graph — fallback EXO."
+                    $sharedResults += [PSCustomObject]@{
+                        UserId                = $oid
+                        DisplayName           = $mbx.DisplayName
+                        UPN                   = $mbx.UserPrincipalName
+                        Mail                  = $mbx.PrimarySmtpAddress
+                        AccountEnabled        = $null
+                        LicenseNames          = ""
+                        HasLicense            = $false
+                        LastInteractiveSignIn = $null
+                        HasInteractiveSignIn  = $false
+                        Alert                 = Get-Text "shared_mailbox_audit.alert_graph_error"
+                    }
+                }
             }
 
             Write-Log -Level "SUCCESS" -Action "SHARED_AUDIT" -Message "$($sharedResults.Count) Shared Mailbox chargée(s) et enrichie(s)."
@@ -827,7 +886,24 @@ function Show-SharedMailboxAuditForm {
 
             $uri = "https://graph.microsoft.com/beta/users/$UserId" + '?$select=id,displayName,userPrincipalName,mail,accountEnabled,assignedLicenses,signInActivity'
             $graphHeaders = @{ "ConsistencyLevel" = "eventual" }
-            $user = Invoke-MgGraphRequest -Method GET -Uri $uri -Headers $graphHeaders -ErrorAction Stop
+
+            # Retry avec backoff sur 429
+            $user = $null
+            $maxRetries = 3
+            for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+                try {
+                    $user = Invoke-MgGraphRequest -Method GET -Uri $uri -Headers $graphHeaders -ErrorAction Stop
+                    break
+                }
+                catch {
+                    if ($_.Exception.Message -match "429|Too Many Requests|throttl" -and $attempt -lt $maxRetries) {
+                        $delay = 3 * $attempt
+                        Write-Log -Level "WARNING" -Action "SHARED_AUDIT" -UPN $UserId -Message "429 — retry $attempt/$maxRetries après ${delay}s."
+                        Start-Sleep -Seconds $delay
+                    }
+                    else { throw }
+                }
+            }
 
             # Construire l'objet mis à jour
             $updatedItem = Build-MailboxResult -GraphUser $user

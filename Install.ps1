@@ -46,7 +46,7 @@ Write-Host ""
 Write-Host "  ╔══════════════════════════════════════════════════╗" -ForegroundColor Magenta
 Write-Host "  ║                                                  ║" -ForegroundColor Magenta
 Write-Host "  ║           M365 Monster — Installateur            ║" -ForegroundColor Magenta
-Write-Host "  ║           v0.1.2                                 ║" -ForegroundColor Magenta
+Write-Host "  ║           v0.1.6                                 ║" -ForegroundColor Magenta
 Write-Host "  ║                                                  ║" -ForegroundColor Magenta
 Write-Host "  ╚══════════════════════════════════════════════════╝" -ForegroundColor Magenta
 Write-Host ""
@@ -114,7 +114,6 @@ try {
     $itemsToCopy = @(
         "Main.ps1",
         "version.json",
-        "update_config.json",
         "Core",
         "Modules",
         "Scripts",
@@ -278,12 +277,31 @@ Write-Host ""
 # ================================================================
 # ETAPE 4 : Configuration de la mise a jour automatique
 # ================================================================
-Write-Host "  [4/5] Configuration de la mise a jour automatique..." -ForegroundColor White
+if (-not $SkipUpdateConfig) {
+    Write-Host "  [4/5] Configuration de la mise a jour automatique..." -ForegroundColor White
 
-$exampleConfig = Join-Path -Path $sourcePath -ChildPath "update_config.example.json"
-$destConfig    = Join-Path -Path $InstallPath -ChildPath "update_config.json"
-Copy-Item -Path $exampleConfig -Destination $destConfig -Force
-Write-Host "        Auto-update activé (vérification à chaque lancement)." -ForegroundColor Green
+    $exampleConfig = Join-Path -Path $sourcePath -ChildPath "update_config.example.json"
+    $destConfig    = Join-Path -Path $InstallPath -ChildPath "update_config.json"
+
+    if (Test-Path $exampleConfig) {
+        # Ne pas ecraser une config existante (preserva les tokens/URLs personnalises)
+        if (-not (Test-Path $destConfig)) {
+            Copy-Item -Path $exampleConfig -Destination $destConfig -Force
+            Write-Host "        update_config.json cree depuis le template." -ForegroundColor Green
+        }
+        else {
+            Write-Host "        update_config.json existe deja — conserve." -ForegroundColor Green
+        }
+        Write-Host "        Auto-update active (verification a chaque lancement)." -ForegroundColor Green
+    }
+    else {
+        Write-Host "        [AVERTISSEMENT] update_config.example.json introuvable." -ForegroundColor Yellow
+        Write-Host "        L'auto-update ne sera pas configure." -ForegroundColor Yellow
+    }
+}
+else {
+    Write-Host "  [4/5] Auto-update — ignore (-SkipUpdateConfig)." -ForegroundColor DarkGray
+}
 
 # ================================================================
 # ETAPE 5 : Resume
