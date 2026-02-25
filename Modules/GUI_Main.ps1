@@ -19,7 +19,7 @@
 function Show-MainWindow {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "$(Get-Text 'app.name') — $($Config.client_name)"
-    $form.Size = New-Object System.Drawing.Size(820, 730)
+    $form.Size = New-Object System.Drawing.Size(820, 948)
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = "FixedSingle"
     $form.MaximizeBox = $false
@@ -88,7 +88,7 @@ function Show-MainWindow {
     $panelHeader.Controls.Add($btnDeconnexion)
 
     # =================================================================
-    # Grille de tuiles — 2 colonnes × 3 lignes
+    # Grille de tuiles — 2 colonnes × 4 lignes
     # =================================================================
     $yStart  = 130
     $btnW    = 350
@@ -211,6 +211,25 @@ function Show-MainWindow {
     }
     $form.Controls.Add($tileSettings)
 
+    # LIGNE 4
+    $row4Y = $row3Y + $btnH + $spacingV
+
+    $tileSharedMailbox = New-MenuTile -Text (Get-Text "main_menu.tile_shared_mailbox") -SubText (Get-Text "main_menu.tile_shared_mailbox_desc") `
+        -X $leftCol -Y $row4Y -Color ([System.Drawing.Color]::FromArgb(23, 162, 184))
+    Set-TileAction -Panel $tileSharedMailbox -Action {
+        Write-Log -Level "INFO" -Action "GUI" -Message "Ouverture de l'audit Shared Mailbox."
+        Show-SharedMailboxAuditForm
+    }
+    $form.Controls.Add($tileSharedMailbox)
+
+    $tileNestedAudit = New-MenuTile -Text (Get-Text "main_menu.tile_nested_audit") -SubText (Get-Text "main_menu.tile_nested_audit_desc") `
+        -X $rightCol -Y $row4Y -Color ([System.Drawing.Color]::FromArgb(32, 201, 151))
+    Set-TileAction -Panel $tileNestedAudit -Action {
+        Write-Log -Level "INFO" -Action "GUI" -Message "Ouverture de l'audit Nested Groups."
+        Show-NestedGroupAuditForm
+    }
+    $form.Controls.Add($tileNestedAudit)
+
     # =================================================================
     # Barre de statut et pied de page
     # =================================================================
@@ -224,7 +243,7 @@ function Show-MainWindow {
     $lblFooter.Text = Get-Text "app.footer"
     $lblFooter.Font = New-Object System.Drawing.Font("Segoe UI", 8)
     $lblFooter.ForeColor = [System.Drawing.Color]::FromArgb(173, 181, 189)
-    $lblFooter.Location = New-Object System.Drawing.Point(25, 650)
+    $lblFooter.Location = New-Object System.Drawing.Point(25, 868)
     $lblFooter.Size = New-Object System.Drawing.Size(450, 20)
     $lblFooter.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
     $form.Controls.Add($lblFooter)

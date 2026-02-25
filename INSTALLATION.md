@@ -34,6 +34,10 @@
    - `Mail.Send` (si notifications)
    - `UserAuthenticationMethod.ReadWrite.All` (reset MFA)
    - `AuditLog.Read.All` (journaux de connexion)
+   - `Device.Read.All` (audit groupes nested — lecture devices)
+   - `DeviceManagementConfiguration.Read.All` (audit Intune — policies config/compliance)
+   - `DeviceManagementApps.Read.All` (audit Intune — applications)
+   - `DeviceManagementManagedDevices.Read.All` (audit Intune — devices managés)
 
 5. **Permissions Exchange Online** — le compte connecté doit avoir le rôle **Exchange Administrator** ou **Recipient Management** sur le tenant pour pouvoir exécuter `Set-Mailbox` (gestion des alias email).
 
@@ -85,6 +89,8 @@ C:\Program Files\M365Monster\
 │   ├── GUI_Onboarding.ps1
 │   ├── GUI_Offboarding.ps1
 │   ├── GUI_Modification.ps1
+│   ├── GUI_SharedMailboxAudit.ps1
+│   ├── GUI_NestedGroupAudit.ps1
 │   └── GUI_Settings.ps1
 ├── Lang/                       # Fichiers de langue
 │   ├── fr.json
@@ -147,13 +153,15 @@ Double-cliquer **M365 Monster** sur le Bureau.
 3. S'authentifier via le navigateur (MFA supporté) — **deux authentifications successives** :
    - Microsoft Graph (Entra ID) — popup navigateur
    - Exchange Online — popup navigateur (même compte, peut s'enchaîner automatiquement)
-4. Utiliser les 6 tuiles du menu principal :
+4. Utiliser les 8 tuiles du menu principal :
    - **Onboarding** — Créer un nouveau compte employé
    - **Offboarding** — Gérer le départ d'un employé
    - **Modification** — Modifier les attributs d'un employé
    - **Types d'employé** — Gestion des Employee Types dans Entra ID
    - **Devices inactifs** — Nettoyage des devices inactifs
    - **Paramétrage** — Gérer les configurations client
+   - **Audit Shared Mailbox** — Auditer les BAL partagées (comptes, licences, sign-in)
+   - **Groupes mixtes (Nested)** — Audit des groupes Entra contenant Users + Devices, impact Intune
 
 ---
 

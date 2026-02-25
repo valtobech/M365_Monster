@@ -77,7 +77,8 @@ $fichiers = @(
     "update_config.example.json",
     "LICENSE",
     "README.md",
-    "INSTALLATION.md"
+    "INSTALLATION.md",
+    "CONFIGURATION.md"
 )
 foreach ($f in $fichiers) {
     if (Test-Path "$source\$f") {

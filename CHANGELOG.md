@@ -6,6 +6,52 @@ Versioning selon [Semantic Versioning](https://semver.org/lang/fr/).
 
 ---
 
+## [0.1.4] — 2026-02-25
+
+### Ajouté
+
+**Nouveau module — Audit des groupes mixtes / Nested Groups (`GUI_NestedGroupAudit.ps1`)**
+
+- **Onglet Scan** : analyse tous les groupes Entra ID et identifie ceux contenant à la fois des utilisateurs et des appareils (groupes « nested » / mixtes). Barre de progression, filtre texte, export CSV.
+- **Onglet Membres** : affichage côte à côte des utilisateurs (DisplayName, UPN, poste) et des devices (nom, OS, DeviceId) pour le groupe sélectionné.
+- **Onglet Impact Intune** : scanne 14 catégories de policies/applications Intune pour identifier celles qui référencent le groupe sélectionné. Catégories couvertes : Applications (Win32, Store, LOB...), App Configurations, Configuration Policies (Settings Catalog), Device Configurations (legacy), Compliance Policies, Group Policy Configurations (ADMX), Autopilot Profiles, Feature Updates, Quality Updates, Driver Updates, Remediation Scripts, Platform Scripts. Affiche le type d'assignation (Inclus/Exclu), l'intent (Required/Available), la plateforme. Export CSV.
+- **Onglet Remédiation** : création de groupes de sécurité séparés `{Original}_User` / `{Original}_Device` avec transfert automatique des membres. Noms pré-remplis et éditables, description automatique, confirmation double avant exécution. Journal des actions en temps réel. Les membres sont ajoutés au nouveau groupe sans être retirés du groupe original.
+
+**Optimisation du scan — Graph Batch API (`/$batch`)**
+
+- Le scan des membres de groupes utilise le endpoint `/$batch` de Microsoft Graph pour envoyer jusqu'à 20 requêtes en parallèle par lot.
+- Gain de performance estimé ~15-20x par rapport au scan séquentiel (ex: 500 groupes = ~25 appels batch au lieu de 500 appels individuels).
+- Anti-throttling de 150ms entre chaque lot.
+
+**Scopes Graph — 4 nouvelles permissions déléguées (permanentes)**
+
+- `Device.Read.All` — lecture des devices Entra (classification des membres)
+- `DeviceManagementConfiguration.Read.All` — lecture des policies Intune (config, compliance, ADMX, Autopilot, updates)
+- `DeviceManagementApps.Read.All` — lecture des applications Intune et leurs assignations
+- `DeviceManagementManagedDevices.Read.All` — lecture des devices managés et scripts de remédiation
+
+**Intégration au menu principal**
+
+- Nouvelle tuile « Groupes mixtes (Nested) » dans `GUI_Main.ps1` (ligne 4, colonne droite, couleur teal).
+- Fenêtre principale agrandie de 840px à 948px pour accueillir la tuile supplémentaire.
+
+**Internationalisation**
+
+- 95+ nouvelles clés i18n (FR + EN) dans la section `nested_group_audit` : onglets, boutons, colonnes, catégories Intune, messages de confirmation, erreurs, journal d'actions.
+- 2 nouvelles clés `main_menu` pour la tuile du menu principal.
+
+### Mis à jour
+
+- `Core/Connect.ps1` : 4 scopes Intune ajoutés au tableau `$scopes` (permanents, aucun impact si non utilisés).
+- `Main.ps1` : dot-sourcing de `GUI_NestedGroupAudit.ps1`.
+- `README.md` : fonctionnalités, tableau de permissions, documentation.
+- `INSTALLATION.md` : permissions API, structure installée (modules), liste des tuiles (8).
+- `CONFIGURATION.md` : nouvelles permissions dans le tableau de la section App Registration.
+- `REFERENCE.md` : arborescence, flux d'exécution, permissions, notes techniques (batch, beta endpoints), historique.
+- `RELEASE_PROCESS.md` : `CONFIGURATION.md` ajouté dans les fichiers du zip.
+
+---
+
 ## [0.1.3] — 2026-02-22
 
 ### Corrigé

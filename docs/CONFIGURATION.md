@@ -94,6 +94,10 @@ C'est l'étape la plus souvent oubliée :
 | `Group.ReadWrite.All` | Ajouter/retirer des utilisateurs des groupes |
 | `Directory.ReadWrite.All` | Accéder aux informations du tenant |
 | `Mail.Send` | Envoyer les notifications email |
+| `Device.Read.All` | Lecture des devices Entra (audit groupes nested) |
+| `DeviceManagementConfiguration.Read.All` | Lecture des policies Intune (configuration, compliance, ADMX) |
+| `DeviceManagementApps.Read.All` | Lecture des applications Intune et leurs assignations |
+| `DeviceManagementManagedDevices.Read.All` | Lecture des devices managés Intune |
 
 3. Cliquer **Grant admin consent for [Tenant]** (bouton bleu en haut)
 4. Vérifier que chaque permission affiche ✅ **Granted**

@@ -246,19 +246,19 @@ if (-not $connectResult.Success) {
     exit
 }
 
-# Étape 4 : Connexion à Exchange Online (requis pour la gestion des alias email)
+# Étape 4 : Connexion à Exchange Online (requis pour la gestion des alias email et shared mailboxes)
 Write-Log -Level "INFO" -Action "CONNEXION_EXO" -Message "Connexion à Exchange Online pour '$($Config.client_name)'..."
 
 $exoResult = Connect-ExchangeOnlineSession
 if (-not $exoResult.Success) {
-    # Non bloquant — avertissement mais l'outil reste utilisable (alias email indisponibles)
+    # Non bloquant — avertissement mais l'outil reste utilisable (alias email et shared mailbox indisponibles)
     [System.Windows.Forms.MessageBox]::Show(
-        "Connexion Exchange Online échouée :`n$($exoResult.Error)`n`nLa gestion des alias email sera indisponible.`nToutes les autres fonctions restent opérationnelles.",
+        "Connexion Exchange Online échouée :`n$($exoResult.Error)`n`nLa gestion des alias email et l'audit des shared mailboxes seront indisponibles.`nToutes les autres fonctions restent opérationnelles.",
         "Avertissement — Exchange Online",
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Warning
     ) | Out-Null
-    Write-Log -Level "WARNING" -Action "CONNEXION_EXO" -Message "EXO indisponible — alias email désactivés."
+    Write-Log -Level "WARNING" -Action "CONNEXION_EXO" -Message "EXO indisponible — alias email et shared mailbox audit désactivés."
 }
 
 # Étape 5 : Dot-sourcing des modules GUI
@@ -266,6 +266,8 @@ if (-not $exoResult.Success) {
 . "$script:RootPath\Modules\GUI_Onboarding.ps1"
 . "$script:RootPath\Modules\GUI_Offboarding.ps1"
 . "$script:RootPath\Modules\GUI_Modification.ps1"
+. "$script:RootPath\Modules\GUI_SharedMailboxAudit.ps1"
+. "$script:RootPath\Modules\GUI_NestedGroupAudit.ps1"
 # GUI_Settings.ps1 déjà chargé avant le sélecteur de client
 
 # Étape 6 : Affichage de la fenêtre principale

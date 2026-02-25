@@ -1,7 +1,7 @@
 # Référence Projet — M365 Monster
 
-> **Version :** 2.2
-> **Date :** 2026-02-22
+> **Version :** 2.3
+> **Date :** 2026-02-25
 > **Portée :** Gestion du cycle de vie employé dans Microsoft 365 / Entra ID, avec interface graphique WinForms, multi-client, multi-langue.
 
 ---
@@ -51,10 +51,12 @@ L'outil est **agnostique au client** : un même set de scripts sert n'importe qu
 │   └── Update.ps1                  # Auto-update depuis GitHub Releases
 │
 ├── 📁 Modules/
-│   ├── GUI_Main.ps1                # Fenêtre principale (6 tuiles)
+│   ├── GUI_Main.ps1                # Fenêtre principale (8 tuiles)
 │   ├── GUI_Onboarding.ps1          # Formulaire d'arrivée employé
 │   ├── GUI_Offboarding.ps1         # Formulaire de départ employé
 │   ├── GUI_Modification.ps1        # Formulaire de modification
+│   ├── GUI_SharedMailboxAudit.ps1  # Audit des boîtes partagées
+│   ├── GUI_NestedGroupAudit.ps1   # Audit des groupes mixtes (Users+Devices) + Intune
 │   └── GUI_Settings.ps1            # Interface de paramétrage client
 │
 ├── 📁 Lang/
@@ -102,7 +104,7 @@ L'outil est **agnostique au client** : un même set de scripts sert n'importe qu
 10. Chargement de la configuration JSON
 11. Connexion Microsoft Graph (interactive_browser)
 12. Chargement des modules GUI restants
-13. Affichage de la fenêtre principale (6 tuiles)
+13. Affichage de la fenêtre principale (8 tuiles)
 14. Déconnexion Graph à la fermeture
 ```
 
@@ -225,17 +227,23 @@ Voir `docs/RELEASE_PROCESS.md`.
 | Permission | Usage dans M365 Monster |
 |---|---|
 | `User.ReadWrite.All` | Créer, modifier (profil, téléphones, UPN), désactiver/réactiver des comptes |
-| `Group.ReadWrite.All` | Ajouter/retirer des utilisateurs des groupes (licences, sécurité) |
+| `Group.ReadWrite.All` | Ajouter/retirer des utilisateurs des groupes (licences, sécurité) ; créer des groupes (remediation nested) |
 | `Directory.ReadWrite.All` | Lire les domaines vérifiés du tenant, accès annuaire étendu |
 | `Mail.Send` | Envoyer les notifications email via `/me/sendMail` |
 | `UserAuthenticationMethod.ReadWrite.All` | Lire et supprimer les méthodes MFA (module Modification — Reset MFA) |
-| `AuditLog.Read.All` | Lire les journaux de connexion (module Modification — Dernières connexions) |
+| `AuditLog.Read.All` | Lire les journaux de connexion (module Modification — Dernières connexions ; Shared Mailbox — last sign-in) |
+| `Device.Read.All` | Lire les devices Entra (module Nested Group Audit — classification des membres) |
+| `DeviceManagementConfiguration.Read.All` | Lire les policies Intune : configuration, compliance, ADMX, Autopilot, updates (module Nested Group Audit) |
+| `DeviceManagementApps.Read.All` | Lire les applications Intune et leurs assignations (module Nested Group Audit) |
+| `DeviceManagementManagedDevices.Read.All` | Lire les devices managés Intune et les scripts de remédiation (module Nested Group Audit) |
 
 ### Notes importantes
 
 - **Téléphones et alias email** : `Update-MgUser` est bloqué par Exchange Online sur `mobilePhone`, `businessPhones` et `proxyAddresses`. L'outil utilise `Invoke-MgGraphRequest PATCH` directement sur `/v1.0/users/{id}` pour contourner cette restriction.
 - **Token en cache** : si `Forbidden (403)` apparaît après ajout d'un scope, fermer et relancer l'outil pour forcer un nouveau token.
 - **proxyAddresses** : Exchange Online gère les alias de façon autonome. L'ajout/suppression via Graph fonctionne uniquement si la boîte Exchange Online est active et que le compte connecté a les droits suffisants.
+- **Endpoints Intune (beta)** : le module Nested Group Audit utilise les endpoints `beta` de Microsoft Graph pour les policies Intune (`/beta/deviceManagement/...`). Ces endpoints peuvent évoluer sans préavis. Chaque catégorie est scannée dans un `try/catch` individuel pour garantir la résilience.
+- **Graph Batch API** : le scan des groupes utilise `/$batch` (paquets de 20 requêtes parallèles) pour accélérer l'analyse des membres. Anti-throttling de 150ms entre chaque lot.
 
 ---
 
@@ -245,6 +253,8 @@ Voir [CHANGELOG.md](CHANGELOG.md) pour le détail complet de chaque version.
 
 | Version | Date | Résumé |
 |---|---|---|
+| `0.1.4` | 2026-02-25 | Nouveau module Audit Groupes Nested (Users+Devices) avec scan Intune |
+| `0.1.3` | 2026-02-23 | Alias email via Exchange Online (Set-Mailbox), connexion EXO, Shared Mailbox Audit |
 | `0.1.2` | 2026-02-22 | Corrections module Modification : alias, téléphones, groupes, UX |
 | `0.1.1` | 2026-02-22 | Corrections UX module Modification : scroll, combos, permissions |
 | `0.1.0` | 2026-02-22 | Version bêta initiale |
