@@ -268,6 +268,7 @@ if (-not $exoResult.Success) {
 . "$script:RootPath\Modules\GUI_Modification.ps1"
 . "$script:RootPath\Modules\GUI_SharedMailboxAudit.ps1"
 . "$script:RootPath\Modules\GUI_NestedGroupAudit.ps1"
+. "$script:RootPath\Modules\GUI_AccessProfiles.ps1"
 # GUI_Settings.ps1 déjà chargé avant le sélecteur de client
 
 # Étape 6 : Affichage de la fenêtre principale

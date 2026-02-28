@@ -1,6 +1,6 @@
 # Guide de configuration — M365 Monster
 
-> **Version :** 2.0 — Février 2026
+> **Version :** 2.1 — Février 2026
 > **Public cible :** Techniciens IT / MSP qui déploient l'outil chez un nouveau client
 
 ---
@@ -12,9 +12,10 @@
 3. [Créer l'App Registration dans Entra ID](#3-créer-lapp-registration-dans-entra-id)
 4. [Méthodes d'authentification](#4-méthodes-dauthentification)
 5. [Référence complète du fichier JSON](#5-référence-complète-du-fichier-json)
-6. [Exemple complet commenté](#6-exemple-complet-commenté)
-7. [Trouver les SKU de licences](#7-trouver-les-sku-de-licences)
-8. [Dépannage](#8-dépannage)
+6. [Profils d'accès](#6-profils-daccès)
+7. [Exemple complet commenté](#7-exemple-complet-commenté)
+8. [Trouver les SKU de licences](#8-trouver-les-sku-de-licences)
+9. [Dépannage](#9-dépannage)
 
 ---
 
@@ -315,7 +316,73 @@ Si `enabled` est `true`, un email est envoyé via Microsoft Graph aux destinatai
 
 ---
 
-## 6. Exemple complet commenté
+## 6. Profils d'accès
+
+La section `access_profiles` est **optionnelle**. Si absente, les fonctionnalités de profils sont simplement masquées dans l'interface. Le `_Template.json` inclut 7 profils par défaut.
+
+### Structure
+
+```json
+"access_profiles": {
+  "base_commune": {
+    "display_name": "Base commune",
+    "description": "Groupes appliqués automatiquement à tous les employés",
+    "is_baseline": true,
+    "groups": [
+      { "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "display_name": "Tous-Employes" },
+      { "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "display_name": "VPN-Access" }
+    ]
+  },
+  "finance": {
+    "display_name": "Finance",
+    "description": "Accès aux outils et ressources du département Finance",
+    "is_baseline": false,
+    "groups": [
+      { "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "display_name": "FIN-SharePoint" },
+      { "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "display_name": "FIN-Teams" },
+      { "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "display_name": "FIN-Budget-App" }
+    ]
+  }
+}
+```
+
+### Référence des champs
+
+| Champ | Type | Obligatoire | Description |
+|---|---|---|---|
+| Clé du profil (ex: `finance`) | string | ✅ | Identifiant unique du profil. Pas d'espaces ni de caractères spéciaux. |
+| `display_name` | string | ✅ | Nom affiché dans l'interface |
+| `description` | string | ✅ | Description affichée à côté du nom dans les sélecteurs |
+| `is_baseline` | bool | ✅ | `true` = appliqué automatiquement à tous les employés (un seul baseline par client) |
+| `groups` | array | ✅ | Tableau d'objets `{id, display_name}` — groupes Entra ID composant le profil |
+| `groups[].id` | string (GUID) | ✅ | Object ID du groupe dans Entra ID |
+| `groups[].display_name` | string | ✅ | Nom du groupe (pour l'affichage dans l'interface) |
+
+### Configuration via l'interface (recommandé)
+
+La méthode la plus simple est d'utiliser le **Gestionnaire de profils d'accès** :
+
+1. Lancer M365 Monster → Paramétrage → **Gestion des profils d'accès**
+2. Cliquer **Nouveau profil** et saisir le nom
+3. Utiliser la recherche de groupes (interroge Entra ID en temps réel) pour ajouter les groupes au profil
+4. Cocher **Profil baseline** si ce profil doit s'appliquer à tous les employés
+5. Cliquer **Enregistrer** — le JSON client est mis à jour automatiquement
+
+Le gestionnaire permet aussi de :
+- **Réconcilier** un profil : détecter les utilisateurs auxquels il manque des groupes par rapport au template, et corriger en lot
+- **Supprimer** un profil existant
+- **Modifier** les groupes d'un profil (ajout/retrait)
+
+### Notes
+
+- Les `id` des groupes doivent correspondre aux Object ID Entra ID réels. Le gestionnaire les renseigne automatiquement lors de la recherche.
+- Si un groupe est supprimé dans Entra ID mais reste référencé dans un profil, l'ajout échouera silencieusement avec un log d'avertissement.
+- Un profil peut contenir 0 à N groupes. Un profil sans groupes est valide mais n'a aucun effet.
+- Le profil baseline est affiché en lecture seule dans l'onboarding et appliqué automatiquement — il n'est pas sélectionnable/décochable.
+
+---
+
+## 7. Exemple complet commenté
 
 Voici un fichier prêt à l'emploi pour un client fictif. Copiez-le, remplacez les valeurs en `⬅` :
 
@@ -377,13 +444,34 @@ Voici un fichier prêt à l'emploi pour un client fictif. Copiez-le, remplacez l
     "length": 16,
     "force_change_at_login": true,
     "include_special_chars": true
+  },
+
+  "access_profiles": {
+    "base_commune": {
+      "display_name": "Base commune",
+      "description": "Groupes appliqués automatiquement à tous les employés",
+      "is_baseline": true,
+      "groups": [
+        { "id": "aaaaaaaa-0000-0000-0000-000000000001", "display_name": "Tous-Employes" },
+        { "id": "aaaaaaaa-0000-0000-0000-000000000002", "display_name": "VPN-Access" }
+      ]
+    },
+    "production": {
+      "display_name": "Production",
+      "description": "Accès aux outils de production et logistique",
+      "is_baseline": false,
+      "groups": [
+        { "id": "bbbbbbbb-0000-0000-0000-000000000001", "display_name": "PROD-SharePoint" },
+        { "id": "bbbbbbbb-0000-0000-0000-000000000002", "display_name": "PROD-Teams" }
+      ]
+    }
   }
 }
 ```
 
 ---
 
-## 7. Trouver les SKU de licences
+## 8. Trouver les SKU de licences
 
 Les SKU de licences ne sont pas évidents. Voici comment les trouver pour un tenant.
 
@@ -422,7 +510,7 @@ Le format est `NomTenant:SKU_PART_NUMBER`. Le `NomTenant` est souvent le nom de 
 
 ---
 
-## 8. Dépannage
+## 9. Dépannage
 
 ### "AADSTS50011: The redirect URI 'ms-appx-web://...' does not match"
 

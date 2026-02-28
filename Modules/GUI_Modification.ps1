@@ -422,6 +422,7 @@ function Show-ModificationForm {
         @{ Type="section"; Text=Get-Text "modification.section_groups" },
         @{ Type="btn"; Text=Get-Text "modification.action_groups_manage"; Tag="groups" },
         @{ Type="section"; Text=Get-Text "modification.section_security" },
+        @{ Type="btn"; Text=Get-Text "modification.action_profile_change"; Tag="profile_change" },
         @{ Type="btn"; Text=Get-Text "modification.action_password";  Tag="password" },
         @{ Type="btn"; Text=Get-Text "modification.action_revoke";    Tag="revoke" },
         @{ Type="btn"; Text=Get-Text "modification.action_mfa_reset"; Tag="mfa" },
@@ -453,6 +454,7 @@ function Show-ModificationForm {
                     "licenses" { Show-ManageLicenses    -UserId $uid -UPN $u }
                     "groups"   { Show-ManageGroups      -UserId $uid -UPN $u }
                     "password" { Show-ResetPassword     -UserId $uid -UPN $u }
+                    "profile_change" { Show-ChangeAccessProfile -UserId $uid -UPN $u }
                     "revoke"   { Invoke-RevokeSession   -UserId $uid -UPN $u }
                     "mfa"      { Invoke-MfaReset        -UserId $uid -UPN $u }
                     "toggle"   { Show-ToggleAccount     -UserId $uid -UPN $u -IsEnabled $ud.AccountEnabled }
@@ -1063,6 +1065,157 @@ function Show-ManageLicenses {
         }
     })
     $f.ShowDialog() | Out-Null; $f.Dispose()
+}
+
+# ============================================================
+#  SOUS-FORMULAIRE — CHANGEMENT DE PROFIL D'ACCÈS
+# ============================================================
+
+function Show-ChangeAccessProfile {
+    param([string]$UserId, [string]$UPN)
+
+    # Vérifier que les profils sont configurés
+    if (-not $Config.PSObject.Properties["access_profiles"]) {
+        Show-ResultDialog -Titre (Get-Text "modification.profile_change_title") `
+            -Message "Aucun profil d'accès configuré pour ce client." -IsSuccess $false
+        return
+    }
+
+    $f = New-SubForm -Titre (Get-Text "modification.profile_change_title") -Largeur 680 -Hauteur 560
+    New-WarningBanner -Parent $f -Message (Get-Text "modification.profile_change_warning") -W 640
+
+    # Détecter les profils actifs de l'utilisateur via ses groupes actuels
+    $currentKeys = @(Get-UserActiveProfiles -UserId $UserId)
+    $allProfiles = Get-AccessProfiles -ExcludeBaseline
+
+    # ---- Colonne gauche : profils actuels (lecture seule, grisé) ----
+    $lCur = New-Object System.Windows.Forms.Label
+    $lCur.Text = Get-Text "modification.profile_current_label"
+    $lCur.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+    $lCur.Location = New-Object System.Drawing.Point(10, 68); $lCur.Size = New-Object System.Drawing.Size(300, 20)
+    $f.Controls.Add($lCur)
+
+    $clbCurrent = New-Object System.Windows.Forms.CheckedListBox
+    $clbCurrent.Location = New-Object System.Drawing.Point(10, 90)
+    $clbCurrent.Size = New-Object System.Drawing.Size(300, 180)
+    $clbCurrent.CheckOnClick = $true; $clbCurrent.Enabled = $false
+    foreach ($ap in $allProfiles) {
+        $idx = $clbCurrent.Items.Add($ap.DisplayName)
+        if ($ap.Key -in $currentKeys) { $clbCurrent.SetItemChecked($idx, $true) }
+    }
+    $f.Controls.Add($clbCurrent)
+
+    # ---- Colonne droite : profils cibles (modifiable par l'opérateur) ----
+    $lTgt = New-Object System.Windows.Forms.Label
+    $lTgt.Text = Get-Text "modification.profile_target_label"
+    $lTgt.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+    $lTgt.Location = New-Object System.Drawing.Point(340, 68); $lTgt.Size = New-Object System.Drawing.Size(300, 20)
+    $f.Controls.Add($lTgt)
+
+    $clbTarget = New-Object System.Windows.Forms.CheckedListBox
+    $clbTarget.Location = New-Object System.Drawing.Point(340, 90)
+    $clbTarget.Size = New-Object System.Drawing.Size(300, 180)
+    $clbTarget.CheckOnClick = $true
+    foreach ($ap in $allProfiles) {
+        $idx = $clbTarget.Items.Add($ap.DisplayName)
+        if ($ap.Key -in $currentKeys) { $clbTarget.SetItemChecked($idx, $true) }
+    }
+    $f.Controls.Add($clbTarget)
+
+    # ---- Zone de prévisualisation du diff (panneau blanc avec police monospace) ----
+    $pnlDiff = New-Object System.Windows.Forms.Panel
+    $pnlDiff.Location = New-Object System.Drawing.Point(10, 280)
+    $pnlDiff.Size = New-Object System.Drawing.Size(640, 180)
+    $pnlDiff.BorderStyle = "FixedSingle"
+    $pnlDiff.AutoScroll = $true
+    $pnlDiff.BackColor = [System.Drawing.Color]::White
+    $f.Controls.Add($pnlDiff)
+
+    $lblDiff = New-Object System.Windows.Forms.Label
+    $lblDiff.Location = New-Object System.Drawing.Point(5, 5)
+    $lblDiff.Size = New-Object System.Drawing.Size(620, 170)
+    $lblDiff.Font = New-Object System.Drawing.Font("Consolas", 9)
+    $pnlDiff.Controls.Add($lblDiff)
+
+    # Fonction interne : calcul du diff entre profils actuels et cibles
+    $ComputeDiff = {
+        # Résoudre les clés cochées dans la colonne cible
+        $targetKeys = @()
+        for ($i = 0; $i -lt $clbTarget.Items.Count; $i++) {
+            if ($clbTarget.GetItemChecked($i)) {
+                $matchedProfile = $allProfiles | Where-Object { $_.DisplayName -eq $clbTarget.Items[$i] }
+                if ($matchedProfile) { $targetKeys += $matchedProfile.Key }
+            }
+        }
+
+        # Appel à Compare-AccessProfileGroups (Phase 1)
+        $diff = Compare-AccessProfileGroups -OldProfileKeys $currentKeys -NewProfileKeys $targetKeys -IncludeBaseline
+        $script:APDiffResult = $diff
+        $script:APTargetKeys = $targetKeys
+
+        # Construire l'affichage texte du diff
+        $lines = @()
+        if ($diff.ToAdd.Count -gt 0) {
+            $lines += "$(Get-Text 'modification.profile_diff_add') :"
+            foreach ($g in $diff.ToAdd) { $lines += "  + $($g.display_name)" }
+        }
+        if ($diff.ToRemove.Count -gt 0) {
+            $lines += "$(Get-Text 'modification.profile_diff_remove') :"
+            foreach ($g in $diff.ToRemove) { $lines += "  - $($g.display_name)" }
+        }
+        if ($diff.ToKeep.Count -gt 0) {
+            $lines += "$(Get-Text 'modification.profile_diff_keep') :"
+            foreach ($g in $diff.ToKeep) { $lines += "  = $($g.display_name)" }
+        }
+        $lines += ""
+        $lines += (Get-Text "modification.profile_diff_summary" $diff.ToAdd.Count $diff.ToRemove.Count $diff.ToKeep.Count)
+        $lblDiff.Text = $lines -join "`n"
+    }
+
+    # Bouton Prévisualiser (calcule et affiche le diff sans rien modifier)
+    $btnPreview = New-ActionButton -Texte (Get-Text "modification.profile_preview_btn") `
+        -X 10 -Y 470 -W 200 -H 32 -Color $script:COLOR_BLUE
+    $btnPreview.Add_Click({ & $ComputeDiff })
+    $f.Controls.Add($btnPreview)
+
+    # Bouton Appliquer (recalcule le diff, demande confirmation, exécute)
+    $btnApply = New-ActionButton -Texte (Get-Text "modification.profile_apply_btn") `
+        -X 340 -Y 470 -W 200 -H 32 -Color $script:COLOR_GREEN
+    $btnApply.Add_Click({
+        & $ComputeDiff
+        $diff = $script:APDiffResult
+        if ($diff.ToAdd.Count -eq 0 -and $diff.ToRemove.Count -eq 0) {
+            Show-ResultDialog -Titre (Get-Text "modification.profile_change_title") `
+                -Message (Get-Text "modification.profile_no_change") -IsSuccess $true
+            return
+        }
+        $summary = Get-Text "modification.profile_diff_summary" $diff.ToAdd.Count $diff.ToRemove.Count $diff.ToKeep.Count
+        $confirm = Show-ConfirmDialog -Titre (Get-Text "modification.confirm_title") `
+            -Message (Get-Text "modification.profile_apply_confirm" $summary)
+        if (-not $confirm) { return }
+
+        $result = Invoke-AccessProfileChange -UserId $UserId -UPN $UPN `
+            -OldProfileKeys $currentKeys -NewProfileKeys $script:APTargetKeys
+        if ($result.Success) {
+            Show-ResultDialog -Titre (Get-Text "modification.success_title") `
+                -Message (Get-Text "modification.profile_apply_success" $result.Added $result.Removed $result.Kept) `
+                -IsSuccess $true
+            $f.DialogResult = [System.Windows.Forms.DialogResult]::OK; $f.Close()
+        }
+        else {
+            Show-ResultDialog -Titre (Get-Text "modification.error_title") `
+                -Message (Get-Text "modification.profile_apply_partial" $result.Errors.Count ($result.Errors -join "`n")) `
+                -IsSuccess $false
+        }
+    })
+    $f.Controls.Add($btnApply)
+
+    # Bouton Fermer
+    $bCl = New-CloseButton -X 550 -Y 470 -W 100 -H 32
+    $f.Controls.Add($bCl)
+
+    $f.ShowDialog() | Out-Null
+    $f.Dispose()
 }
 
 # ============================================================

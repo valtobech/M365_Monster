@@ -19,6 +19,51 @@
     "Teams-General"
   ],
 
+  "access_profiles": {
+    "Common": {
+      "display_name": "Base commune",
+      "description": "Groupes appliqués automatiquement à tous les employés",
+      "is_baseline": true,
+      "groups": []
+    },
+    "Finance": {
+      "display_name": "Finance",
+      "description": "Équipe comptabilité et finances",
+      "is_baseline": false,
+      "groups": []
+    },
+    "Legal": {
+      "display_name": "Juridique",
+      "description": "Département juridique et conformité",
+      "is_baseline": false,
+      "groups": []
+    },
+    "RH": {
+      "display_name": "Ressources humaines",
+      "description": "Équipe RH et recrutement",
+      "is_baseline": false,
+      "groups": []
+    },
+    "Direction": {
+      "display_name": "Direction",
+      "description": "Équipe de direction et management exécutif",
+      "is_baseline": false,
+      "groups": []
+    },
+    "TI": {
+      "display_name": "Technologies de l'information",
+      "description": "Équipe TI / support / infrastructure",
+      "is_baseline": false,
+      "groups": []
+    },
+    "Maintenance": {
+      "display_name": "Maintenance",
+      "description": "Équipe de maintenance et opérations",
+      "is_baseline": false,
+      "groups": []
+    }
+  },
+
   "offboarding": {
     "disabled_ou_group": "Comptes-Désactivés",
     "mailbox_forward_to": "",

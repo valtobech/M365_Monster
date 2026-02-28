@@ -1,7 +1,7 @@
 # Référence Projet — M365 Monster
 
-> **Version :** 2.4
-> **Date :** 2026-02-25
+> **Version :** 2.5
+> **Date :** 2026-02-28
 > **Portée :** Gestion du cycle de vie employé dans Microsoft 365 / Entra ID, avec interface graphique WinForms, multi-client, multi-langue.
 
 ---
@@ -27,7 +27,7 @@ L'outil est **agnostique au client** : un même set de scripts sert n'importe qu
 | Journalisation | Fichier `.log` horodaté par session dans `%APPDATA%` |
 | Auto-update | GitHub Releases via `Core/Update.ps1` + `version.json` |
 | Installation | `Install.ps1` / `Uninstall.ps1` (détection auto PS7) |
-| Dépendances modules | `Microsoft.Graph` (PowerShell SDK) |
+| Dépendances modules | `Microsoft.Graph` (PowerShell SDK), `ExchangeOnlineManagement` |
 
 ---
 
@@ -44,17 +44,18 @@ L'outil est **agnostique au client** : un même set de scripts sert n'importe qu
 │
 ├── 📁 Core/
 │   ├── Config.ps1                  # Chargement et validation du JSON client
-│   ├── Connect.ps1                 # Authentification Microsoft Graph
-│   ├── Functions.ps1               # Utilitaires (logs, mdp, dialogs...)
-│   ├── GraphAPI.ps1                # Wrappers sur les appels Graph
+│   ├── Connect.ps1                 # Authentification Microsoft Graph + Exchange Online
+│   ├── Functions.ps1               # Utilitaires (logs, mdp, dialogs, profils d'accès)
+│   ├── GraphAPI.ps1                # Wrappers sur les appels Graph (dont Search-AzGroups)
 │   ├── Lang.ps1                    # Système i18n (Get-Text, Initialize-Language)
 │   └── Update.ps1                  # Auto-update depuis GitHub Releases
 │
 ├── 📁 Modules/
 │   ├── GUI_Main.ps1                # Fenêtre principale (8 tuiles)
-│   ├── GUI_Onboarding.ps1          # Formulaire d'arrivée employé
+│   ├── GUI_Onboarding.ps1          # Formulaire d'arrivée employé (+ profils d'accès)
 │   ├── GUI_Offboarding.ps1         # Formulaire de départ employé
-│   ├── GUI_Modification.ps1        # Formulaire de modification
+│   ├── GUI_Modification.ps1        # Formulaire de modification (+ changement de profils)
+│   ├── GUI_AccessProfiles.ps1      # Gestionnaire de profils d'accès + réconciliation
 │   ├── GUI_SharedMailboxAudit.ps1  # Audit des boîtes partagées
 │   ├── GUI_NestedGroupAudit.ps1   # Audit des groupes mixtes (Users+Devices) + Intune
 │   └── GUI_Settings.ps1            # Interface de paramétrage client
@@ -102,10 +103,10 @@ L'outil est **agnostique au client** : un même set de scripts sert n'importe qu
 8. Chargement anticipé de GUI_Settings (pour le sélecteur de client)
 9. Sélection du client (liste déroulante + bouton "Nouveau client")
 10. Chargement de la configuration JSON
-11. Connexion Microsoft Graph (interactive_browser)
-12. Chargement des modules GUI restants
+11. Connexion Microsoft Graph (interactive_browser) + Exchange Online
+12. Chargement des modules GUI restants (dont GUI_AccessProfiles)
 13. Affichage de la fenêtre principale (8 tuiles)
-14. Déconnexion Graph à la fermeture
+14. Déconnexion Graph + EXO à la fermeture
 ```
 
 ---
@@ -134,7 +135,58 @@ L'outil est **agnostique au client** : un même set de scripts sert n'importe qu
 
 ---
 
-## 6. Auto-update
+## 6. Profils d'accès
+
+### Concept
+
+Les profils d'accès sont des packages composables de groupes Entra ID. Chaque profil regroupe un ensemble logique de groupes (ex : « Finance » = 3 groupes spécifiques). Le système permet de standardiser les attributions de groupes lors de l'onboarding et de détecter/corriger les écarts en production.
+
+### Architecture
+
+- **Stockage** : section `access_profiles` dans le JSON client. Chaque profil a une clé unique, un `display_name`, une `description`, un flag `is_baseline`, et un tableau `groups` (objets `{id, display_name}`).
+- **Profil baseline** : marqué `is_baseline: true`, appliqué automatiquement à tous les employés (onboarding et réconciliation). Un seul baseline par client.
+- **Profils additionnels** : sélectionnables individuellement lors de l'onboarding ou de la modification.
+
+### Fonctions backend (`Core/Functions.ps1`)
+
+| Fonction | Rôle |
+|---|---|
+| `Get-AccessProfiles` | Liste des profils du client, filtrage baseline optionnel |
+| `Get-BaselineProfile` | Retourne le profil baseline ou `$null` |
+| `Compare-AccessProfileGroups` | Diff intelligent entre anciens et nouveaux profils (ToAdd, ToRemove, ToKeep) |
+| `Invoke-AccessProfileChange` | Applique les ajouts/retraits chirurgicaux sur un utilisateur |
+| `Get-UserActiveProfiles` | Détecte les profils actifs par correspondance complète des groupes |
+| `Get-ProfileReconciliation` | Scan batch des écarts template vs production |
+| `Invoke-ProfileReconciliation` | Applique les corrections en lot avec progression |
+
+### Algorithme de diff (`Compare-AccessProfileGroups`)
+
+Le diff est conçu pour minimiser les interruptions de service :
+
+1. Collecter les groupes des anciens profils → `$oldGroups`
+2. Collecter les groupes des nouveaux profils → `$newGroups`
+3. Baseline ajouté dans `$newGroups` toujours, et dans `$oldGroups` uniquement si `OldProfileKeys.Count > 0` (évite le bug onboarding)
+4. Intersection = `$toKeep` (pas touché), nouveaux uniquement = `$toAdd`, anciens uniquement = `$toRemove`
+
+### Algorithme de réconciliation (`Get-ProfileReconciliation`)
+
+Complexité O(N) où N = nombre de groupes dans le profil :
+
+1. Pour chaque groupe G du profil : `Get-MgGroupMember -All` → liste des membres
+2. Construction d'une map `userId → {UPN, DisplayName, PresentGroupIds}`
+3. Seuil : un utilisateur est candidat si `PresentGroupIds.Count >= max(1, N-1)` mais `< N`
+4. Les groupes manquants sont identifiés par différence ensembliste
+
+### Points d'intégration
+
+- **Onboarding** (`GUI_Onboarding.ps1`) : section profils d'accès avec baseline en lecture seule, profils additionnels en CheckedListBox, prévisualisation, application à la création.
+- **Modification** (`GUI_Modification.ps1`) : `Show-ChangeAccessProfile` avec détection des profils actuels et diff interactif.
+- **Gestionnaire** (`GUI_AccessProfiles.ps1`) : CRUD complet + recherche Graph + réconciliation.
+- **Paramètres** (`GUI_Settings.ps1`) : bouton d'accès au gestionnaire.
+
+---
+
+## 7. Auto-update
 
 ### Fonctionnement
 
@@ -173,7 +225,7 @@ Voir `docs/RELEASE_PROCESS.md`.
 
 ---
 
-## 7. Installation et désinstallation
+## 8. Installation et désinstallation
 
 ### Install.ps1
 
@@ -202,7 +254,7 @@ Voir `docs/RELEASE_PROCESS.md`.
 
 ---
 
-## 8. Conventions de code
+## 9. Conventions de code
 
 | Convention | Détail |
 |---|---|
@@ -217,9 +269,7 @@ Voir `docs/RELEASE_PROCESS.md`.
 
 ---
 
----
-
-## 9. Permissions API Microsoft Graph
+## 10. Permissions API Microsoft Graph
 
 > Toutes les permissions sont de type **Délégué** (`Delegated`) — connexion interactive uniquement.
 > Admin consent requis sur chaque tenant client.
@@ -227,7 +277,7 @@ Voir `docs/RELEASE_PROCESS.md`.
 | Permission | Usage dans M365 Monster |
 |---|---|
 | `User.ReadWrite.All` | Créer, modifier (profil, téléphones, UPN), désactiver/réactiver des comptes |
-| `Group.ReadWrite.All` | Ajouter/retirer des utilisateurs des groupes (licences, sécurité) ; créer des groupes (remediation nested) |
+| `Group.ReadWrite.All` | Ajouter/retirer des utilisateurs des groupes (licences, sécurité, profils d'accès) ; créer des groupes (remediation nested) |
 | `Directory.ReadWrite.All` | Lire les domaines vérifiés du tenant, accès annuaire étendu |
 | `Mail.Send` | Envoyer les notifications email via `/me/sendMail` |
 | `UserAuthenticationMethod.ReadWrite.All` | Lire et supprimer les méthodes MFA (module Modification — Reset MFA) |
@@ -239,22 +289,24 @@ Voir `docs/RELEASE_PROCESS.md`.
 
 ### Notes importantes
 
+- **Profils d'accès** : utilisent `Group.ReadWrite.All` pour les ajouts/retraits de groupes et `Get-MgGroupMember` pour la réconciliation. Aucune permission supplémentaire requise.
 - **Téléphones et alias email** : `Update-MgUser` est bloqué par Exchange Online sur `mobilePhone`, `businessPhones` et `proxyAddresses`. L'outil utilise `Invoke-MgGraphRequest PATCH` directement sur `/v1.0/users/{id}` pour contourner cette restriction.
 - **Token en cache** : si `Forbidden (403)` apparaît après ajout d'un scope, fermer et relancer l'outil pour forcer un nouveau token.
 - **proxyAddresses** : Exchange Online gère les alias de façon autonome. L'ajout/suppression via Graph fonctionne uniquement si la boîte Exchange Online est active et que le compte connecté a les droits suffisants.
 - **Endpoints Intune (beta)** : le module Nested Group Audit utilise les endpoints `beta` de Microsoft Graph pour les policies Intune (`/beta/deviceManagement/...`). Ces endpoints peuvent évoluer sans préavis. Chaque catégorie est scannée dans un `try/catch` individuel pour garantir la résilience.
-- **Graph Batch API** : le scan des groupes utilise `/$batch` (paquets de 20 requêtes parallèles) pour accélérer l'analyse des membres. Anti-throttling de 150ms entre chaque lot.
+- **Graph Batch API** : le scan des groupes et la réconciliation utilisent des stratégies batch pour minimiser les appels API. Anti-throttling intégré entre chaque lot.
 - **Renommage de groupes** : le module Nested Group Audit utilise `Update-MgGroup` pour renommer le groupe d'origine lors de la séparation Users/Devices. Le `mailNickname` est mis à jour simultanément (caractères non-alphanumériques supprimés).
 - **Suppression de membres** : `Remove-MgGroupMemberByRef` est utilisé pour retirer les membres transférés du groupe source. L'opération est unitaire (un appel par membre) avec progression visuelle et compteur d'erreurs.
 
 ---
 
-## 10. Historique des versions
+## 11. Historique des versions
 
 Voir [CHANGELOG.md](CHANGELOG.md) pour le détail complet de chaque version.
 
 | Version | Date | Résumé |
 |---|---|---|
+| `0.1.7` | 2026-02-28 | Profils d'accès : gestion, onboarding, modification, réconciliation |
 | `0.1.5` | 2026-02-25 | Audit Nested : renommage croisé groupe d'origine + suppression membres transférés |
 | `0.1.4` | 2026-02-25 | Nouveau module Audit Groupes Nested (Users+Devices) avec scan Intune |
 | `0.1.3` | 2026-02-23 | Alias email via Exchange Online (Set-Mailbox), connexion EXO, Shared Mailbox Audit |

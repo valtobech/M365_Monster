@@ -1,6 +1,6 @@
 {
-  "version": "0.1.6",
-  "release_date": "2026-02-25",
+  "version": "0.1.7",
+  "release_date": "2026-02-28",
   "minimum_ps_version": "7.0",
-  "release_notes": "perf: v0.1.6 — optimisation enrichissement Graph SharedMailboxAudit (6min → 10s)"
+  "release_notes": "Nouveau module Profils d'accès — gestion, onboarding, modification, réconciliation"
 }

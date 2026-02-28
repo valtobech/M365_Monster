@@ -92,6 +92,18 @@ function Show-SettingsForm {
     $btnSupprimer.ForeColor = [System.Drawing.Color]::FromArgb(220, 53, 69)
     $form.Controls.Add($btnSupprimer)
 
+    # Bouton profils d'accès
+    $btnAccessProfiles = New-Object System.Windows.Forms.Button
+    $btnAccessProfiles.Text = Get-Text "access_profiles.title"
+    $btnAccessProfiles.Location = New-Object System.Drawing.Point(460, 45)
+    $btnAccessProfiles.Size = New-Object System.Drawing.Size(200, 30)
+    $btnAccessProfiles.FlatStyle = "Flat"
+    $btnAccessProfiles.BackColor = [System.Drawing.Color]::FromArgb(0, 123, 255)
+    $btnAccessProfiles.ForeColor = [System.Drawing.Color]::White
+    $btnAccessProfiles.Add_Click({ Show-AccessProfileEditor })
+    $form.Controls.Add($btnAccessProfiles)
+    
+
     # Separateur
     $sep = New-Object System.Windows.Forms.Label
     $sep.BorderStyle = "Fixed3D"
@@ -307,8 +319,23 @@ function Show-SettingsForm {
                 force_change_at_login = $chkForceChange.Checked
                 include_special_chars = $chkSpecialChars.Checked
             }
+
+            
         }
+
+                # Préserver les access_profiles du fichier existant si présents
+        if ($script:EditingFilePath -and (Test-Path $script:EditingFilePath)) {
+            try {
+                $existingConfig = Get-Content -Path $script:EditingFilePath -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ($existingConfig.PSObject.Properties["access_profiles"]) {
+                    $obj["access_profiles"] = $existingConfig.access_profiles
+                }
+            } catch { }
+        }
+        
         return $obj
+
+        
     }
 
     # =================================================================

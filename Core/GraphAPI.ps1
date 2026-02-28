@@ -752,3 +752,116 @@ function Get-AzDistinctValues {
         return [PSCustomObject]@{ Success = $false; Data = @(); Error = $errMsg }
     }
 }
+
+function Search-AzGroups {
+    <#
+    .SYNOPSIS
+        Recherche des groupes Entra ID par nom (recherche partielle).
+        Utilisé par l'éditeur de profils d'accès pour résoudre les groupes
+        sans saisie manuelle de GUID.
+
+    .PARAMETER SearchTerm
+        Terme de recherche (partiel) sur le displayName du groupe.
+
+    .PARAMETER MaxResults
+        Nombre maximum de résultats retournés (défaut : 20).
+
+    .OUTPUTS
+        [PSCustomObject] — {Success: bool, Data: array, Error: string}
+        Data contient des objets avec : Id, DisplayName, GroupTypes, MailEnabled, SecurityEnabled
+
+    .EXAMPLE
+        Search-AzGroups -SearchTerm "Finance"
+        # Retourne tous les groupes dont le nom contient "Finance"
+
+    .NOTES
+        Utilise $search avec ConsistencyLevel: eventual pour la recherche partielle.
+        Identique au pattern de Search-AzUsers dans GraphAPI.ps1.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$SearchTerm,
+
+        [int]$MaxResults = 20
+    )
+
+    try {
+        Write-Log -Level "INFO" -Action "SEARCH_GROUPS" -Message "Recherche de groupes : '$SearchTerm'"
+
+        # $search avec ConsistencyLevel eventual — recherche partielle (contains)
+        $groups = Get-MgGroup `
+            -Search "`"displayName:$SearchTerm`"" `
+            -Top $MaxResults `
+            -Property "id,displayName,groupTypes,mailEnabled,securityEnabled,description" `
+            -ConsistencyLevel "eventual" `
+            -CountVariable countVar `
+            -ErrorAction Stop
+
+        Write-Log -Level "INFO" -Action "SEARCH_GROUPS" -Message "$($groups.Count) groupe(s) trouvé(s) pour '$SearchTerm'."
+
+        return [PSCustomObject]@{ Success = $true; Data = $groups; Error = $null }
+    }
+    catch {
+        $errMsg = $_.Exception.Message
+        Write-Log -Level "ERROR" -Action "SEARCH_GROUPS" -Message "Erreur recherche groupes '$SearchTerm' : $errMsg"
+        return [PSCustomObject]@{ Success = $false; Data = @(); Error = $errMsg }
+    }
+}
+
+function Remove-AzUserFromGroup {
+    <#
+    .SYNOPSIS
+        Retire un utilisateur d'un groupe Entra ID spécifique (par ID de groupe).
+        Complément à Add-AzUserToGroup pour la gestion fine des profils d'accès.
+
+    .PARAMETER UserId
+        ID Entra de l'utilisateur.
+
+    .PARAMETER GroupId
+        ID du groupe Entra ID.
+
+    .PARAMETER GroupName
+        Nom du groupe (pour le logging uniquement).
+
+    .OUTPUTS
+        [PSCustomObject] — {Success: bool, Error: string}
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$UserId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$GroupId,
+
+        [string]$GroupName = ""
+    )
+
+    $label = if ($GroupName) { "'$GroupName' ($GroupId)" } else { $GroupId }
+
+    try {
+        Write-Log -Level "INFO" -Action "REMOVE_FROM_GROUP" -UPN $UserId -Message "Retrait du groupe $label."
+
+        Remove-MgGroupMemberByRef -GroupId $GroupId -DirectoryObjectId $UserId -ErrorAction Stop
+
+        Write-Log -Level "SUCCESS" -Action "REMOVE_FROM_GROUP" -UPN $UserId -Message "Retiré du groupe $label."
+        return [PSCustomObject]@{ Success = $true; Error = $null }
+    }
+    catch {
+        $errMsg = $_.Exception.Message
+        # "Not a member" ou "does not exist" = déjà retiré
+        if ($errMsg -like "*not found*" -or $errMsg -like "*does not exist*") {
+            Write-Log -Level "WARNING" -Action "REMOVE_FROM_GROUP" -UPN $UserId -Message "Déjà absent du groupe $label — ignoré."
+            return [PSCustomObject]@{ Success = $true; Error = $null }
+        }
+        Write-Log -Level "ERROR" -Action "REMOVE_FROM_GROUP" -UPN $UserId -Message "Erreur retrait groupe $label : $errMsg"
+        return [PSCustomObject]@{ Success = $false; Error = $errMsg }
+    }
+}
+
+
+
+
+
+

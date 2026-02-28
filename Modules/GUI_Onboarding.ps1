@@ -376,6 +376,100 @@ function Show-OnboardingForm {
     $panelMain.Controls.Add($clbGroupes)
     $yPos += 88
 
+# =================================================================
+    # SECTION : Profils d'accès (si configurés)
+    # =================================================================
+    $script:OnbProfileKeys = @()  # Clés des profils cochés (pour la soumission)
+
+    if ($Config.PSObject.Properties["access_profiles"]) {
+        $onbProfiles = Get-AccessProfiles -ExcludeBaseline
+        $onbBaseline = Get-BaselineProfile
+
+        if ($onbProfiles.Count -gt 0 -or $onbBaseline) {
+            $lblSectionAP = New-Object System.Windows.Forms.Label
+            $lblSectionAP.Text = Get-Text "onboarding.section_access_profiles"
+            $lblSectionAP.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+            $lblSectionAP.ForeColor = [System.Drawing.Color]::FromArgb(0, 123, 255)
+            $lblSectionAP.Location = New-Object System.Drawing.Point($lblX, $yPos)
+            $lblSectionAP.Size = New-Object System.Drawing.Size(620, 22)
+            $panelMain.Controls.Add($lblSectionAP)
+            $yPos += 26
+
+            # Baseline (lecture seule, toujours appliqué)
+            if ($onbBaseline) {
+                Add-Label -Text (Get-Text "onboarding.profile_baseline_label") -Y $yPos -Required $false
+                $lblBaselineVal = New-Object System.Windows.Forms.Label
+                $lblBaselineVal.Text = "$($onbBaseline.DisplayName) ($($onbBaseline.Groups.Count) groupe(s))"
+                $lblBaselineVal.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Italic)
+                $lblBaselineVal.ForeColor = [System.Drawing.Color]::FromArgb(40, 120, 40)
+                $lblBaselineVal.Location = New-Object System.Drawing.Point($fldX, ($yPos + 2))
+                $lblBaselineVal.Size = New-Object System.Drawing.Size($fldW, 20)
+                $panelMain.Controls.Add($lblBaselineVal)
+                $yPos += $lineH
+            }
+
+            # Profils additionnels (CheckedListBox)
+            if ($onbProfiles.Count -gt 0) {
+                Add-Label -Text (Get-Text "onboarding.profile_select_label") -Y $yPos -Required $false
+                $clbProfiles = New-Object System.Windows.Forms.CheckedListBox
+                $clbProfiles.Location = New-Object System.Drawing.Point($fldX, $yPos)
+                $clbProfiles.Size = New-Object System.Drawing.Size($fldW, ([Math]::Min(($onbProfiles.Count * 20 + 4), 120)))
+                $clbProfiles.CheckOnClick = $true
+                foreach ($ap in $onbProfiles) {
+                    $clbProfiles.Items.Add("$($ap.DisplayName) — $($ap.Description)", $false) | Out-Null
+                }
+                $panelMain.Controls.Add($clbProfiles)
+                $yPos += $clbProfiles.Size.Height + 8
+            }
+
+            # Bouton Prévisualiser (liste tous les groupes résultants)
+            $btnPreviewGrp = New-Object System.Windows.Forms.Button
+            $btnPreviewGrp.Text = Get-Text "onboarding.profile_preview_btn"
+            $btnPreviewGrp.Location = New-Object System.Drawing.Point($fldX, $yPos)
+            $btnPreviewGrp.Size = New-Object System.Drawing.Size(200, 28)
+            $btnPreviewGrp.FlatStyle = "Flat"
+            $btnPreviewGrp.BackColor = [System.Drawing.Color]::FromArgb(0, 123, 255)
+            $btnPreviewGrp.ForeColor = [System.Drawing.Color]::White
+            $btnPreviewGrp.Add_Click({
+                # Collecter les clés cochées
+                $selectedKeys = @()
+                if ($clbProfiles) {
+                    for ($i = 0; $i -lt $clbProfiles.Items.Count; $i++) {
+                        if ($clbProfiles.GetItemChecked($i)) {
+                            $selectedKeys += $onbProfiles[$i].Key
+                        }
+                    }
+                }
+                # Calculer le diff (pas de profils anciens pour un onboarding)
+                $diff = Compare-AccessProfileGroups -OldProfileKeys @() -NewProfileKeys $selectedKeys -IncludeBaseline
+                $previewLines = @()
+                foreach ($g in $diff.ToAdd) {
+                    # Trouver le profil source pour info
+                    $source = ""
+                    if ($onbBaseline) {
+                        $baseGrpIds = @($onbBaseline.Groups | ForEach-Object { $_.id })
+                        if ($g.id -in $baseGrpIds) { $source = Get-Text "onboarding.profile_preview_source" $onbBaseline.DisplayName }
+                    }
+                    if (-not $source) {
+                        foreach ($ap in $onbProfiles) {
+                            if ($ap.Key -in $selectedKeys) {
+                                $apGrpIds = @($ap.Groups | ForEach-Object { $_.id })
+                                if ($g.id -in $apGrpIds) { $source = Get-Text "onboarding.profile_preview_source" $ap.DisplayName; break }
+                            }
+                        }
+                    }
+                    $previewLines += "+ $($g.display_name)  $source"
+                }
+                $total = Get-Text "onboarding.profile_preview_total" $diff.ToAdd.Count
+                $msg = "$total`n`n$($previewLines -join "`n")"
+                [System.Windows.Forms.MessageBox]::Show($msg, (Get-Text "onboarding.profile_preview_title"),
+                    [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+            })
+            $panelMain.Controls.Add($btnPreviewGrp)
+            $yPos += 36
+        }
+    }
+
     # =================================================================
     # SECTION : Mot de passe (info)
     # =================================================================
@@ -445,6 +539,7 @@ function Show-OnboardingForm {
     # =================================================================
     $btnCreer.Add_Click({
         $lblErreur.Visible = $false
+
 
         # --- Validation des champs obligatoires ---
         $nom       = $txtNom.Text.Trim()
@@ -519,6 +614,24 @@ function Show-OnboardingForm {
             $confirmMsg += "$(Get-Text 'onboarding.confirm_groups')         : $($groupesSelectionnes -join ', ')`n"
         }
 
+        # Profils d'accès sélectionnés
+        $script:OnbProfileKeys = @()
+        if ($Config.PSObject.Properties["access_profiles"] -and $clbProfiles) {
+            for ($i = 0; $i -lt $clbProfiles.Items.Count; $i++) {
+                if ($clbProfiles.GetItemChecked($i)) {
+                    $script:OnbProfileKeys += $onbProfiles[$i].Key
+                }
+            }
+            if ($script:OnbProfileKeys.Count -gt 0) {
+                $profileNames = ($script:OnbProfileKeys | ForEach-Object { $Config.access_profiles.$_.display_name }) -join ', '
+                $confirmMsg += "$(Get-Text 'onboarding.confirm_profiles')  : $profileNames`n"
+            }
+            $baseline = Get-BaselineProfile
+            if ($baseline) {
+                $confirmMsg += "$(Get-Text 'onboarding.profile_baseline_label') $($baseline.DisplayName)`n"
+            }
+        }
+
         $confirm = Show-ConfirmDialog -Titre (Get-Text "onboarding.confirm_title") -Message $confirmMsg
         if (-not $confirm) { return }
 
@@ -575,6 +688,15 @@ function Show-OnboardingForm {
             foreach ($grp in $groupesSelectionnes) {
                 $grpResult = Add-AzUserToGroup -UserId $newUserId -GroupName $grp
                 if (-not $grpResult.Success) { $erreurs += "Groupe '$grp' : $($grpResult.Error)" }
+            }
+
+            # 6b. Application des profils d'accès
+            if ($script:OnbProfileKeys.Count -gt 0 -or ($Config.PSObject.Properties["access_profiles"] -and (Get-BaselineProfile))) {
+                $profileResult = Invoke-AccessProfileChange -UserId $newUserId -UPN $upn `
+                    -OldProfileKeys @() -NewProfileKeys $script:OnbProfileKeys
+                if (-not $profileResult.Success) {
+                    foreach ($err in $profileResult.Errors) { $erreurs += "Profil : $err" }
+                }
             }
 
             # 7. Notification

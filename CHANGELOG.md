@@ -6,29 +6,66 @@ Versioning selon [Semantic Versioning](https://semver.org/lang/fr/).
 
 ---
 
-## [0.1.6] — 2026-02-25
+## [0.1.7] — 2026-02-28
+
+### Ajouté
+
+**Nouveau module — Profils d'accès (`GUI_AccessProfiles.ps1`)**
+
+Système complet de gestion de profils d'accès composables : chaque profil regroupe un ensemble de groupes Entra ID qui forment un package cohérent (ex : « Finance » = 3 groupes). Les profils sont stockés dans le JSON client et s'appliquent lors de l'onboarding, de la modification et via la réconciliation.
+
+- **Gestionnaire de profils** (Paramètres → Gestion des profils d'accès) : interface CRUD pour créer, éditer et supprimer des profils. Recherche de groupes Entra ID en temps réel via Graph API, profil baseline (appliqué automatiquement à tous les employés), sauvegarde persistante dans le JSON client.
+- **Intégration Onboarding** : section « Profils d'accès » dans le formulaire de création. Le profil baseline est affiché en lecture seule (toujours appliqué). Les profils additionnels sont sélectionnables via CheckedListBox. Bouton « Prévisualiser les groupes » affiche la liste complète des groupes résultants avec leur profil source. Les groupes sont ajoutés à l'utilisateur lors de la création.
+- **Intégration Modification** : changement de profils dans le module Modification via `Show-ChangeAccessProfile`. Affichage des profils actuels (détectés) et sélection des nouveaux profils. Diff intelligent : les groupes à l'intersection ne sont pas touchés, seuls les ajouts/retraits chirurgicaux sont exécutés.
+- **Réconciliation** (bouton « Réconcilier » dans le gestionnaire de profils) : scan des utilisateurs associés à un profil et détection des groupes manquants. Algorithme batch O(N) — N appels Graph (un par groupe du profil), pas de requête par utilisateur. Seuil configurable pour minimiser les faux positifs. DataGridView avec lignes rouges (écarts) / vertes (corrigés). Application en lot avec barre de progression. Export CSV avec piste d'audit complète (UPN, groupes manquants, profil source).
+
+**Fonctions backend — `Core/Functions.ps1`**
+
+- `Get-AccessProfiles` : retourne la liste des profils du client courant avec filtrage baseline optionnel.
+- `Get-BaselineProfile` : retourne le profil marqué `is_baseline = true`.
+- `Compare-AccessProfileGroups` : calcule le diff intelligent entre deux ensembles de profils (ToAdd, ToRemove, ToKeep). Inclut automatiquement le baseline. Gère correctement le cas onboarding (OldProfileKeys vide).
+- `Get-UserActiveProfiles` : détecte les profils actifs d'un utilisateur par correspondance complète de ses appartenances de groupes.
+- `Invoke-AccessProfileChange` : applique un changement de profils (ajouts + retraits chirurgicaux). Gère les cas « already member » et « not found » silencieusement.
+- `Get-ProfileReconciliation` : scan batch des écarts entre un template de profil et les utilisateurs en production.
+- `Invoke-ProfileReconciliation` : applique les corrections avec progression et gestion d'erreur granulaire.
+
+**Fonctions Graph API — `Core/GraphAPI.ps1`**
+
+- `Search-AzGroups` : recherche de groupes Entra ID par nom (préfixe) pour l'éditeur de profils.
+
+**Configuration client — `_Template.json`**
+
+- Nouvelle section optionnelle `access_profiles` avec 7 profils par défaut : Base commune [B], Direction, Finance, Juridique, Maintenance, Ressources humaines, Technologies de l'information.
+- Rétrocompatible : les clients sans `access_profiles` ne sont pas impactés.
+
+**Internationalisation**
+
+- 30+ nouvelles clés i18n (FR + EN) dans les sections `access_profiles` et `onboarding` : éditeur de profils, recherche de groupes, prévisualisation, réconciliation, messages de confirmation et d'erreur.
 
 ### Corrigé
 
-**Audit Shared Mailbox — Performance et throttling Graph API**
-
-- **Chargement initial très lent (~6 min pour 63 BAL)** : l'enrichissement Graph via `$batch` avec `signInActivity` déclenchait un throttling massif (429 Too Many Requests). Chaque batch de 20 sous-requêtes prenait ~80 secondes à cause du coût interne de `signInActivity` côté Microsoft.
-- **Erreurs 429 fréquentes au rechargement** : les appels Graph saturaient le quota API du tenant, provoquant des rejets en cascade sur les batchs suivants.
+- **Profils d'accès — bouton « Nouveau profil » tronqué** : largeur élargie de 95px à 110px pour afficher le texte FR complet.
+- **Profils d'accès — bouton recherche affichant un carré** : l'emoji 🔍 (non supporté par WinForms) remplacé par un bouton texte « Rechercher » via `Get-Text`.
+- **Profils d'accès — bouton « Réconcilier » masqué** : zone de résultats de recherche réduite (120→100px), repositionnement du hint et des boutons d'action pour éviter les chevauchements.
+- **Profils d'accès — faux avertissement « non sauvegardé »** : le flag `$script:APDirty` n'était jamais remis à `$false` après sauvegarde. Ajout du reset après persist réussi.
+- **Profils d'accès — message de fermeture hardcodé** : chaîne FR remplacée par `Get-Text "access_profiles.unsaved_warning"`.
+- **Onboarding — baseline non appliqué** : le diff `Compare-AccessProfileGroups` plaçait le baseline dans `$oldGroups` même pour un onboarding (`OldProfileKeys = @()`), causant son classement en `$toKeep` au lieu de `$toAdd`. Corrigé par condition `$OldProfileKeys.Count -gt 0`.
+- **Onboarding — profils additionnels non appliqués** : la garde `Get-Variable -Scope Local` créait un `$clbProfiles = $null` local qui masquait la variable du scope parent. Bloc supprimé.
 
 ### Mis à jour
 
-**Audit Shared Mailbox — Réécriture de la stratégie d'enrichissement Graph (`GUI_SharedMailboxAudit.ps1`)**
-
-Architecture 2 passes séparées remplaçant le `$batch` monolithique :
-
-- **Passe 1 — Graph v1.0 `$filter`** : récupération des propriétés de base (`accountEnabled`, `assignedLicenses`, `mail`, etc.) via `GET /v1.0/users?$filter=id eq '...'&$select=...` par lots de 15 IDs. Requête de liste paginée sur v1.0, quasi instantanée, sans throttling.
-- **Passe 2 — Graph beta `$filter`** : récupération de `signInActivity` via `GET /beta/users?$filter=id eq '...'&$select=id,signInActivity` par lots de 15 IDs. Une seule requête HTTP par lot (au lieu de 20 sous-requêtes `$batch`), ce qui réduit drastiquement la pression sur le rate limiter Graph.
-- **Pré-chargement du cache SKU** : `Get-LicenseSkuNames` appelé avant le traitement des batchs (au lieu du lazy-load dans `Resolve-SkuName`).
-- **Retry avec backoff sur 429** : chaque requête `$filter` dispose d'un retry progressif (3 tentatives, backoff 5s/10s/15s) en cas de throttling résiduel.
-- **Throttle inter-lots** : pause de 300ms entre les lots `signInActivity` pour lisser la charge.
-- **Rafraîchissement individuel (`Update-SingleRowInPlace`)** : ajout d'un retry avec backoff (3 tentatives, 3s/6s/9s) sur les appels Graph unitaires lors du refresh d'une ligne.
-
-**Résultat** : chargement de 63 BAL en ~10 secondes (vs ~6 minutes), zéro erreur 429 en conditions normales.
+- `Core/Functions.ps1` : +7 fonctions profils d'accès (Get-AccessProfiles, Get-BaselineProfile, Compare-AccessProfileGroups, Invoke-AccessProfileChange, Get-UserActiveProfiles, Get-ProfileReconciliation, Invoke-ProfileReconciliation).
+- `Core/GraphAPI.ps1` : +1 fonction (Search-AzGroups).
+- `Modules/GUI_AccessProfiles.ps1` : nouveau module ~820 lignes (éditeur + réconciliation).
+- `Modules/GUI_Onboarding.ps1` : 3 insertions (section GUI profils, récapitulatif confirmation, appel Invoke-AccessProfileChange).
+- `Modules/GUI_Modification.ps1` : intégration Show-ChangeAccessProfile.
+- `Modules/GUI_Settings.ps1` : bouton d'accès au gestionnaire de profils.
+- `Main.ps1` : dot-sourcing de `GUI_AccessProfiles.ps1`.
+- `Clients/_Template.json` : section `access_profiles` avec 7 profils par défaut.
+- `Lang/fr.json`, `Lang/en.json` : 30+ nouvelles clés i18n.
+- `REFERENCE.md` : v2.5, section profils d'accès, architecture, historique.
+- `INSTALLATION.md` : module GUI_AccessProfiles dans la structure, section profils dans l'utilisation.
+- `CONFIGURATION.md` : v2.1, référence complète de la section `access_profiles`.
 
 ---
 

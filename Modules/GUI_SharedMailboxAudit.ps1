@@ -1191,7 +1191,7 @@ function Show-SharedMailboxAuditForm {
 
     # --- Clic sur une checkbox → mettre à jour le panneau d'actions ---
     $dgv.Add_CellContentClick({
-        param($sender, $e)
+        param($senderAddress, $e)
         # Vérifier que c'est la colonne checkbox (index 0)
         if ($e.ColumnIndex -eq 0 -and $e.RowIndex -ge 0) {
             # Forcer le commit de la valeur éditée avant lecture

@@ -46,7 +46,7 @@ Write-Host ""
 Write-Host "  ╔══════════════════════════════════════════════════╗" -ForegroundColor Magenta
 Write-Host "  ║                                                  ║" -ForegroundColor Magenta
 Write-Host "  ║           M365 Monster — Installateur            ║" -ForegroundColor Magenta
-Write-Host "  ║           v0.1.6                                 ║" -ForegroundColor Magenta
+Write-Host "  ║           v0.1.7                                 ║" -ForegroundColor Magenta
 Write-Host "  ║                                                  ║" -ForegroundColor Magenta
 Write-Host "  ╚══════════════════════════════════════════════════╝" -ForegroundColor Magenta
 Write-Host ""

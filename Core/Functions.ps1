@@ -590,6 +590,593 @@ function Get-MailNickname {
     return $UPN.Split('@')[0]
 }
 
+function Get-AccessProfiles {
+    <#
+    .SYNOPSIS
+        Retourne la liste des profils d'accès du client courant.
+
+    .PARAMETER ExcludeBaseline
+        Exclure le profil baseline (pratique pour les dropdowns de sélection).
+
+    .OUTPUTS
+        [PSCustomObject[]] — Liste des profils avec Key, DisplayName, Description, IsBaseline, Groups.
+    #>
+    [CmdletBinding()]
+    param(
+        [switch]$ExcludeBaseline
+    )
+
+    # Vérifier que la section existe dans la config client
+    if (-not $Config.PSObject.Properties["access_profiles"]) {
+        Write-Log -Level "WARNING" -Action "ACCESS_PROFILES" -Message "Aucun profil d'accès configuré pour ce client."
+        return @()
+    }
+
+    $profiles = @()
+    foreach ($key in $Config.access_profiles.PSObject.Properties.Name) {
+        $ap = $Config.access_profiles.$key
+        if ($ExcludeBaseline -and $ap.is_baseline) { continue }
+
+        $profiles += [PSCustomObject]@{
+            Key         = $key
+            DisplayName = $ap.display_name
+            Description = $ap.description
+            IsBaseline  = [bool]$ap.is_baseline
+            Groups      = @($ap.groups)
+}
+    }
+
+    return $profiles
+}
+
+function Get-BaselineProfile {
+    <#
+    .SYNOPSIS
+        Retourne le profil baseline (is_baseline = true), ou $null si inexistant.
+
+    .OUTPUTS
+        [PSCustomObject] — Profil baseline avec Key, DisplayName, Description, IsBaseline, Groups.
+                           $null si aucun profil baseline n'est défini.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $all = Get-AccessProfiles
+    return $all | Where-Object { $_.IsBaseline -eq $true } | Select-Object -First 1
+}
+
+function Compare-AccessProfileGroups {
+    <#
+    .SYNOPSIS
+        Compare deux ensembles de profils et retourne le diff de groupes.
+        Gère intelligemment les intersections pour éviter retrait + re-ajout inutile.
+
+    .PARAMETER OldProfileKeys
+        Clés des profils actuellement assignés à l'utilisateur.
+
+    .PARAMETER NewProfileKeys
+        Clés des profils cibles à appliquer.
+
+    .PARAMETER IncludeBaseline
+        Inclure automatiquement le profil baseline dans les deux ensembles.
+
+    .OUTPUTS
+        [PSCustomObject] — {
+            ToAdd    : [array] — Groupes à ajouter   (objets {id, display_name})
+            ToRemove : [array] — Groupes à retirer    (objets {id, display_name})
+            ToKeep   : [array] — Groupes inchangés    (objets {id, display_name})
+        }
+    #>
+    [CmdletBinding()]
+    param(
+        [string[]]$OldProfileKeys = @(),
+        [string[]]$NewProfileKeys = @(),
+        [switch]$IncludeBaseline
+    )
+
+    # Collecter tous les groupes des anciens profils (hashtable id → objet)
+    $oldGroups = @{}
+    foreach ($key in $OldProfileKeys) {
+        if ($Config.access_profiles.PSObject.Properties[$key]) {
+            foreach ($grp in $Config.access_profiles.$key.groups) {
+                if (-not $oldGroups.ContainsKey($grp.id)) {
+                    $oldGroups[$grp.id] = $grp
+                }
+            }
+        }
+    }
+
+    # Collecter tous les groupes des nouveaux profils
+    $newGroups = @{}
+    foreach ($key in $NewProfileKeys) {
+        if ($Config.access_profiles.PSObject.Properties[$key]) {
+            foreach ($grp in $Config.access_profiles.$key.groups) {
+                if (-not $newGroups.ContainsKey($grp.id)) {
+                    $newGroups[$grp.id] = $grp
+                }
+            }
+        }
+    }
+
+    # Ajouter le baseline dans les deux ensembles si demandé
+    if ($IncludeBaseline) {
+        $baseline = Get-BaselineProfile
+        if ($baseline) {
+            foreach ($grp in $baseline.Groups) {
+                if ($OldProfileKeys.Count -gt 0 -and -not $oldGroups.ContainsKey($grp.id)) { $oldGroups[$grp.id] = $grp }
+                if (-not $newGroups.ContainsKey($grp.id)) { $newGroups[$grp.id] = $grp }
+            }
+        }
+    }
+
+    # Calculer le diff
+    $toAdd    = @()
+    $toRemove = @()
+    $toKeep   = @()
+
+    # Groupes dans le nouveau set : soit à ajouter, soit à conserver
+    foreach ($id in $newGroups.Keys) {
+        if ($oldGroups.ContainsKey($id)) {
+            $toKeep += $newGroups[$id]
+        }
+        else {
+            $toAdd += $newGroups[$id]
+        }
+    }
+
+    # Groupes dans l'ancien set mais pas dans le nouveau → à retirer
+    foreach ($id in $oldGroups.Keys) {
+        if (-not $newGroups.ContainsKey($id)) {
+            $toRemove += $oldGroups[$id]
+        }
+    }
+
+    return [PSCustomObject]@{
+        ToAdd    = $toAdd
+        ToRemove = $toRemove
+        ToKeep   = $toKeep
+    }
+}
+
+function Invoke-AccessProfileChange {
+    <#
+    .SYNOPSIS
+        Applique un changement de profils d'accès à un utilisateur Entra ID.
+        Retire chirurgicalement les groupes obsolètes, ajoute les nouveaux,
+        et conserve les groupes à l'intersection sans les toucher.
+
+    .PARAMETER UserId
+        ID Entra de l'utilisateur cible.
+
+    .PARAMETER UPN
+        UPN de l'utilisateur (pour le logging).
+
+    .PARAMETER OldProfileKeys
+        Clés des profils actuels à retirer. Vide pour un onboarding.
+
+    .PARAMETER NewProfileKeys
+        Clés des profils cibles à appliquer.
+
+    .OUTPUTS
+        [PSCustomObject] — {
+            Success : bool
+            Added   : int — Nombre de groupes ajoutés
+            Removed : int — Nombre de groupes retirés
+            Kept    : int — Nombre de groupes conservés (intersection)
+            Errors  : string[] — Messages d'erreur éventuels
+        }
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$UserId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$UPN,
+
+        [string[]]$OldProfileKeys = @(),
+        [string[]]$NewProfileKeys = @()
+    )
+
+    # 1. Calculer le diff intelligent
+    $diff = Compare-AccessProfileGroups `
+        -OldProfileKeys $OldProfileKeys `
+        -NewProfileKeys $NewProfileKeys `
+        -IncludeBaseline
+
+    Write-Log -Level "INFO" -Action "PROFILE_CHANGE" -UPN $UPN `
+        -Message "Changement de profil : [$($OldProfileKeys -join ', ')] → [$($NewProfileKeys -join ', ')] | +$($diff.ToAdd.Count) -$($diff.ToRemove.Count) =$($diff.ToKeep.Count)"
+
+    $errors = @()
+
+    # 2. Retirer les groupes obsolètes (ceux de l'ancien profil qui ne sont pas dans le nouveau)
+    foreach ($grp in $diff.ToRemove) {
+        try {
+            Remove-MgGroupMemberByRef -GroupId $grp.id -DirectoryObjectId $UserId -ErrorAction Stop
+            Write-Log -Level "SUCCESS" -Action "PROFILE_REMOVE_GROUP" -UPN $UPN `
+                -Message "Retiré du groupe '$($grp.display_name)' ($($grp.id))"
+        }
+        catch {
+            $errMsg = $_.Exception.Message
+            # "Not found" ou "does not exist" = déjà retiré, pas une erreur bloquante
+            if ($errMsg -like "*not found*" -or $errMsg -like "*does not exist*") {
+                Write-Log -Level "WARNING" -Action "PROFILE_REMOVE_GROUP" -UPN $UPN `
+                    -Message "Déjà absent du groupe '$($grp.display_name)' — ignoré."
+            }
+            else {
+                $errors += "Retrait '$($grp.display_name)' : $errMsg"
+                Write-Log -Level "ERROR" -Action "PROFILE_REMOVE_GROUP" -UPN $UPN `
+                    -Message "Erreur retrait '$($grp.display_name)' : $errMsg"
+            }
+        }
+    }
+
+    # 3. Ajouter les nouveaux groupes
+    foreach ($grp in $diff.ToAdd) {
+        # Utiliser Add-AzUserToGroup qui gère déjà le "already exists" comme un succès
+        $result = Add-AzUserToGroup -UserId $UserId -GroupName $grp.display_name
+        if (-not $result.Success) {
+            $errors += "Ajout '$($grp.display_name)' : $($result.Error)"
+        }
+    }
+
+    # 4. Log récapitulatif
+    $level = if ($errors.Count -eq 0) { "SUCCESS" } else { "WARNING" }
+    Write-Log -Level $level -Action "PROFILE_CHANGE" -UPN $UPN `
+        -Message "Résultat : +$($diff.ToAdd.Count) ajouté(s), -$($diff.ToRemove.Count) retiré(s), $($diff.ToKeep.Count) conservé(s). Erreurs: $($errors.Count)"
+
+    return [PSCustomObject]@{
+        Success = ($errors.Count -eq 0)
+        Added   = $diff.ToAdd.Count
+        Removed = $diff.ToRemove.Count
+        Kept    = $diff.ToKeep.Count
+        Errors  = $errors
+    }
+}
+
+function Get-UserActiveProfiles {
+    <#
+    .SYNOPSIS
+        Détecte quels profils d'accès sont actuellement actifs pour un utilisateur
+        en comparant ses appartenances de groupes avec les définitions de profils.
+
+    .DESCRIPTION
+        Un profil est considéré "actif" si TOUS ses groupes sont présents dans
+        les appartenances de l'utilisateur. Un profil sans groupes n'est jamais actif.
+
+    .PARAMETER UserId
+        ID Entra de l'utilisateur à analyser.
+
+    .OUTPUTS
+        [string[]] — Clés des profils actifs (ex: @("Finance", "TI")).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$UserId
+    )
+
+    try {
+        # Récupérer toutes les appartenances de groupes de l'utilisateur
+        $memberships = Get-MgUserMemberOf -UserId $UserId -ErrorAction Stop
+        $userGroupIds = @(
+            $memberships |
+            Where-Object { $_.AdditionalProperties.'@odata.type' -eq '#microsoft.graph.group' } |
+            ForEach-Object { $_.Id }
+        )
+
+        $activeProfiles = @()
+        $profiles = Get-AccessProfiles -ExcludeBaseline
+
+        foreach ($ap in $profiles) {
+                if ($ap.Groups.Count -eq 0) { continue }
+
+            # Vérifier que TOUS les groupes du profil sont présents
+            $allPresent = $true
+            foreach ($grp in $ap.Groups) {
+                if ($grp.id -notin $userGroupIds) {
+                    $allPresent = $false
+                    break
+                }
+            }
+
+            if ($allPresent) {
+                $activeProfiles += $ap.Key
+            }
+        }
+
+        Write-Log -Level "INFO" -Action "DETECT_PROFILES" -UPN $UserId `
+            -Message "Profils actifs détectés : [$($activeProfiles -join ', ')]"
+
+        return $activeProfiles
+    }
+    catch {
+        $errMsg = $_.Exception.Message
+        Write-Log -Level "ERROR" -Action "DETECT_PROFILES" -UPN $UserId `
+            -Message "Erreur détection profils : $errMsg"
+        return @()
+    }
+}
+
+# =============================================================================
+#  RÉCONCILIATION — Fonctions à AJOUTER à la fin de AccessProfiles_Functions.ps1
+#  (avant le commentaire "Point d'attention")
+# =============================================================================
+
+function Get-ProfileReconciliation {
+    <#
+    .SYNOPSIS
+        Compare les utilisateurs associés à un profil avec sa définition actuelle.
+        Identifie les écarts : groupes du template manquants chez certains users.
+
+    .DESCRIPTION
+        Stratégie batch (O(N) appels Graph, N = nb de groupes dans le profil) :
+        1. Pour chaque groupe du profil, récupère ses membres via Get-MgGroupMember.
+        2. Construit un dictionnaire userId → { UPN, DisplayName, groupes présents }.
+        3. Retourne les users qui sont dans AU MOINS 1 groupe du profil
+           mais à qui il MANQUE au moins 1 groupe.
+
+        Cela détecte les users existants qui n'ont pas reçu un groupe
+        récemment ajouté au template.
+
+    .PARAMETER ProfileKey
+        Clé technique du profil à analyser (ex: "Finance").
+
+    .PARAMETER MinGroupThreshold
+        Nombre minimum de groupes du profil que l'utilisateur doit posséder
+        pour être considéré comme "associé" au profil. Par défaut : -1
+        (= totalGroupes - 1, soit tolérance d'un seul groupe manquant).
+        Mettre 1 pour attraper tous les users qui ont au moins 1 groupe du profil.
+
+    .OUTPUTS
+        [PSCustomObject] — {
+            ProfileKey:      string
+            ProfileName:     string
+            TotalGroups:     int
+            Discrepancies:   [PSCustomObject[]] — { UserId, UPN, DisplayName, Missing[] }
+            TotalUsers:      int  (nombre d'utilisateurs analysés)
+            Error:           string | $null
+        }
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ProfileKey,
+
+        [int]$MinGroupThreshold = -1
+    )
+
+    # Validation
+    if (-not $Config.PSObject.Properties["access_profiles"]) {
+        return [PSCustomObject]@{
+            ProfileKey    = $ProfileKey
+            ProfileName   = ""
+            TotalGroups   = 0
+            Discrepancies = @()
+            TotalUsers    = 0
+            Error         = "Aucune section access_profiles dans la configuration."
+        }
+    }
+
+    if (-not $Config.access_profiles.PSObject.Properties[$ProfileKey]) {
+        return [PSCustomObject]@{
+            ProfileKey    = $ProfileKey
+            ProfileName   = ""
+            TotalGroups   = 0
+            Discrepancies = @()
+            TotalUsers    = 0
+            Error         = "Profil '$ProfileKey' introuvable."
+        }
+    }
+
+    $ap = $Config.access_profiles.$ProfileKey
+    $profileGroups = @($ap.groups)
+    $totalGroups   = $profileGroups.Count
+
+    if ($totalGroups -eq 0) {
+        return [PSCustomObject]@{
+            ProfileKey    = $ProfileKey
+            ProfileName   = $ap.display_name
+            TotalGroups   = 0
+            Discrepancies = @()
+            TotalUsers    = 0
+            Error         = $null
+        }
+    }
+
+    # Seuil par défaut : l'utilisateur doit avoir au moins (N-1) groupes
+    if ($MinGroupThreshold -le 0) {
+        $MinGroupThreshold = [Math]::Max(1, $totalGroups - 1)
+    }
+
+    Write-Log -Level "INFO" -Action "RECONCILE_SCAN" `
+        -Message "Scan réconciliation profil '$ProfileKey' ($totalGroups groupes, seuil=$MinGroupThreshold)"
+
+    try {
+        # Dictionnaire : userId → { UPN, DisplayName, PresentGroupIds = HashSet }
+        $userMap = @{}
+
+        foreach ($grp in $profileGroups) {
+            try {
+                $members = Get-MgGroupMember -GroupId $grp.id -All -ErrorAction Stop
+                foreach ($member in $members) {
+                    # Filtrer : uniquement les utilisateurs (pas les devices, groupes imbriqués, etc.)
+                    if ($member.AdditionalProperties.'@odata.type' -ne '#microsoft.graph.user') { continue }
+
+                    $uid = $member.Id
+                    if (-not $userMap.ContainsKey($uid)) {
+                        $userMap[$uid] = @{
+                            UPN             = $member.AdditionalProperties.userPrincipalName
+                            DisplayName     = $member.AdditionalProperties.displayName
+                            PresentGroupIds = [System.Collections.Generic.HashSet[string]]::new()
+                        }
+                    }
+                    [void]$userMap[$uid].PresentGroupIds.Add($grp.id)
+                }
+            }
+            catch {
+                Write-Log -Level "WARNING" -Action "RECONCILE_SCAN" `
+                    -Message "Impossible de lire les membres du groupe '$($grp.display_name)' ($($grp.id)) : $($_.Exception.Message)"
+            }
+        }
+
+        # Identifier les écarts
+        $discrepancies = @()
+        $profileGroupIds = @($profileGroups | ForEach-Object { $_.id })
+
+        foreach ($uid in $userMap.Keys) {
+            $entry = $userMap[$uid]
+            $presentCount = $entry.PresentGroupIds.Count
+
+            # L'utilisateur doit être dans au moins $MinGroupThreshold groupes
+            # ET il doit lui manquer au moins 1 groupe
+            if ($presentCount -ge $MinGroupThreshold -and $presentCount -lt $totalGroups) {
+                $missingIds = @($profileGroupIds | Where-Object { -not $entry.PresentGroupIds.Contains($_) })
+                $missingNames = @($missingIds | ForEach-Object {
+                    $gid = $_
+                    ($profileGroups | Where-Object { $_.id -eq $gid }).display_name
+                })
+
+                $discrepancies += [PSCustomObject]@{
+                    UserId      = $uid
+                    UPN         = $entry.UPN
+                    DisplayName = $entry.DisplayName
+                    Missing     = $missingNames
+                    MissingIds  = $missingIds
+                }
+            }
+        }
+
+        # Trier par UPN pour lisibilité
+        $discrepancies = @($discrepancies | Sort-Object -Property UPN)
+
+        Write-Log -Level "INFO" -Action "RECONCILE_SCAN" `
+            -Message "Résultat : $($userMap.Count) utilisateurs analysés, $($discrepancies.Count) écart(s) détecté(s)"
+
+        return [PSCustomObject]@{
+            ProfileKey    = $ProfileKey
+            ProfileName   = $ap.display_name
+            TotalGroups   = $totalGroups
+            Discrepancies = $discrepancies
+            TotalUsers    = $userMap.Count
+            Error         = $null
+        }
+    }
+    catch {
+        $errMsg = $_.Exception.Message
+        Write-Log -Level "ERROR" -Action "RECONCILE_SCAN" -Message "Erreur réconciliation : $errMsg"
+        return [PSCustomObject]@{
+            ProfileKey    = $ProfileKey
+            ProfileName   = $ap.display_name
+            TotalGroups   = $totalGroups
+            Discrepancies = @()
+            TotalUsers    = 0
+            Error         = $errMsg
+        }
+    }
+}
+
+
+function Invoke-ProfileReconciliation {
+    <#
+    .SYNOPSIS
+        Applique la réconciliation : ajoute les groupes manquants aux utilisateurs
+        identifiés par Get-ProfileReconciliation.
+
+    .PARAMETER Discrepancies
+        Tableau de PSCustomObject tel que retourné par Get-ProfileReconciliation.Discrepancies.
+        Chaque objet contient : UserId, UPN, MissingIds, Missing (display_names).
+
+    .PARAMETER ProfileKey
+        Clé du profil (pour le logging).
+
+    .PARAMETER OnProgress
+        ScriptBlock optionnel appelé à chaque itération avec ($current, $total, $upn).
+
+    .OUTPUTS
+        [PSCustomObject] — {
+            Success:   bool
+            Applied:   int
+            Failed:    int
+            Errors:    string[]
+        }
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object[]]$Discrepancies,
+
+        [string]$ProfileKey = "?",
+
+        [scriptblock]$OnProgress = $null
+    )
+
+    $errors  = @()
+    $applied = 0
+    $failed  = 0
+    $total   = $Discrepancies.Count
+
+    Write-Log -Level "INFO" -Action "RECONCILE_APPLY" `
+        -Message "Début réconciliation profil '$ProfileKey' pour $total utilisateur(s)"
+
+    for ($i = 0; $i -lt $total; $i++) {
+        $disc = $Discrepancies[$i]
+
+        # Callback de progression
+        if ($OnProgress) {
+            try { & $OnProgress ($i + 1) $total $disc.UPN } catch {}
+        }
+
+        $userErrors = @()
+        foreach ($gid in $disc.MissingIds) {
+            $gName = ($disc.Missing | Select-Object -Index ([Array]::IndexOf($disc.MissingIds, $gid)))
+            if (-not $gName) { $gName = $gid }
+
+            try {
+                $body = @{
+                    "@odata.id" = "https://graph.microsoft.com/v1.0/directoryObjects/$($disc.UserId)"
+                }
+                New-MgGroupMemberByRef -GroupId $gid -BodyParameter $body -ErrorAction Stop
+
+                Write-Log -Level "SUCCESS" -Action "RECONCILE_ADD_GROUP" -UPN $disc.UPN `
+                    -Message "Ajouté au groupe '$gName' ($gid)"
+            }
+            catch {
+                $errMsg = $_.Exception.Message
+                # "already a member" n'est pas une vraie erreur
+                if ($errMsg -like "*already exist*" -or $errMsg -like "*already a member*") {
+                    Write-Log -Level "INFO" -Action "RECONCILE_ADD_GROUP" -UPN $disc.UPN `
+                        -Message "Déjà membre du groupe '$gName' — ignoré"
+                }
+                else {
+                    $userErrors += "$gName : $errMsg"
+                    Write-Log -Level "ERROR" -Action "RECONCILE_ADD_GROUP" -UPN $disc.UPN `
+                        -Message "Erreur ajout '$gName' : $errMsg"
+                }
+            }
+        }
+
+        if ($userErrors.Count -eq 0) {
+            $applied++
+        }
+        else {
+            $failed++
+            $errors += "$($disc.UPN) : $($userErrors -join ' | ')"
+        }
+    }
+
+    $level = if ($failed -eq 0) { "SUCCESS" } else { "WARNING" }
+    Write-Log -Level $level -Action "RECONCILE_APPLY" `
+        -Message "Réconciliation terminée : $applied réussi(s), $failed échoué(s) sur $total"
+
+    return [PSCustomObject]@{
+        Success = ($failed -eq 0)
+        Applied = $applied
+        Failed  = $failed
+        Errors  = $errors
+    }
+}
+
 # Point d'attention :
 # - Write-Log écrit à la fois dans le fichier ET dans la console
 # - New-SecurePassword exclut les caractères ambigus (0/O, 1/l/I)
