@@ -412,11 +412,28 @@ function Show-AccessProfileEditor {
     })
 
     # Retirer des groupes du profil
+    # Retirer des groupes du profil (avec tracking pour réconciliation)
     $btnRemoveGrp.Add_Click({
         $key = $script:APCurrentKey
         if (-not $key -or -not $script:APData.ContainsKey($key)) { return }
         $sel = @($lstGroups.SelectedItems)
+
+        # Initialiser _pending_removals si inexistant
+        if (-not $script:APData[$key].PSObject.Properties["_pending_removals"]) {
+            $script:APData[$key] | Add-Member -NotePropertyName "_pending_removals" -NotePropertyValue @() -Force
+        }
+
         foreach ($gName in $sel) {
+            # Trouver l'objet groupe complet (id + display_name) avant suppression
+            $grpObj = $script:APData[$key].groups | Where-Object { $_.display_name -eq $gName } | Select-Object -First 1
+            if ($grpObj) {
+                # Stocker dans _pending_removals pour la réconciliation
+                $alreadyPending = $script:APData[$key]._pending_removals | Where-Object { $_.id -eq $grpObj.id }
+                if (-not $alreadyPending) {
+                    $script:APData[$key]._pending_removals += @{ id = $grpObj.id; display_name = $grpObj.display_name }
+                }
+            }
+            # Retirer du profil
             $script:APData[$key].groups = @($script:APData[$key].groups | Where-Object { $_.display_name -ne $gName })
         }
         $script:APDirty = $true
@@ -676,15 +693,36 @@ function Show-ProfileReconciliation {
     $colMissing.FillWeight = 35
     $dgv.Columns.Add($colMissing) | Out-Null
 
-    # Remplir les données
+    # Remplir les données (groupes manquants ET à retirer)
     foreach ($disc in $scanResult.Discrepancies) {
-        $missingStr = $disc.Missing -join ", "
-        $dgv.Rows.Add($disc.UPN, $disc.DisplayName, $missingStr) | Out-Null
+        $parts = @()
+        if ($disc.Missing -and $disc.Missing.Count -gt 0) {
+            foreach ($g in $disc.Missing) { $parts += "+ $g" }
+        }
+        if ($disc.ToRemove -and $disc.ToRemove.Count -gt 0) {
+            foreach ($g in $disc.ToRemove) { $parts += "- $g" }
+        }
+        $dgv.Rows.Add($disc.UPN, $disc.DisplayName, ($parts -join ", ")) | Out-Null
     }
 
-    # Coloration des lignes
-    foreach ($row in $dgv.Rows) {
-        $row.DefaultCellStyle.ForeColor = [System.Drawing.Color]::FromArgb(180, 30, 30)
+    # Coloration des lignes selon le type d'écart
+    for ($r = 0; $r -lt $dgv.Rows.Count; $r++) {
+        $disc = $scanResult.Discrepancies[$r]
+        $hasMissing = ($disc.Missing -and $disc.Missing.Count -gt 0)
+        $hasRemoval = ($disc.ToRemove -and $disc.ToRemove.Count -gt 0)
+
+        if ($hasMissing -and $hasRemoval) {
+            # Les deux types d'écart → orange
+            $dgv.Rows[$r].DefaultCellStyle.ForeColor = [System.Drawing.Color]::FromArgb(200, 120, 0)
+        }
+        elseif ($hasRemoval) {
+            # Retrait uniquement → bleu
+            $dgv.Rows[$r].DefaultCellStyle.ForeColor = [System.Drawing.Color]::FromArgb(0, 90, 180)
+        }
+        else {
+            # Manquant uniquement → rouge
+            $dgv.Rows[$r].DefaultCellStyle.ForeColor = [System.Drawing.Color]::FromArgb(180, 30, 30)
+        }
     }
 
     # ============================================================
@@ -762,6 +800,17 @@ function Show-ProfileReconciliation {
             foreach ($row in $dgv.Rows) {
                 $row.DefaultCellStyle.ForeColor = [System.Drawing.Color]::FromArgb(40, 167, 69)
             }
+            # Persister le nettoyage de _pending_removals dans le JSON
+            try {
+                $clientFile = Join-Path $RootPath "Clients" "$($Config.client_name).json"
+                $Config | ConvertTo-Json -Depth 10 | Set-Content -Path $clientFile -Encoding UTF8
+                Write-Log -Level "INFO" -Action "RECONCILE_PERSIST" `
+                    -Message "JSON client sauvegardé après nettoyage _pending_removals"
+            }
+            catch {
+                Write-Log -Level "WARNING" -Action "RECONCILE_PERSIST" `
+                    -Message "Impossible de sauvegarder le JSON : $($_.Exception.Message)"
+            }
             Show-ResultDialog -Titre (Get-Text "access_profiles.reconcile_title" $scanResult.ProfileName) `
                 -Message (Get-Text "access_profiles.reconcile_success" $result.Applied) -IsSuccess $true
         }
@@ -790,14 +839,17 @@ function Show-ProfileReconciliation {
                 $csvData = @()
                 foreach ($disc in $scanResult.Discrepancies) {
                     $csvData += [PSCustomObject]@{
-                        UPN             = $disc.UPN
-                        DisplayName     = $disc.DisplayName
-                        MissingGroups   = ($disc.Missing -join "; ")
-                        MissingGroupIds = ($disc.MissingIds -join "; ")
-                        ProfileKey      = $scanResult.ProfileKey
-                        ProfileName     = $scanResult.ProfileName
+                        UPN              = $disc.UPN
+                        DisplayName      = $disc.DisplayName
+                        MissingGroups    = ($disc.Missing -join "; ")
+                        MissingGroupIds  = ($disc.MissingIds -join "; ")
+                        ToRemoveGroups   = ($disc.ToRemove -join "; ")
+                        ToRemoveGroupIds = ($disc.ToRemoveIds -join "; ")
+                        ProfileKey       = $scanResult.ProfileKey
+                        ProfileName      = $scanResult.ProfileName
                     }
                 }
+                
                 $csvData | Export-Csv -Path $sfd.FileName -NoTypeInformation -Encoding UTF8
                 Write-Log -Level "SUCCESS" -Action "RECONCILE_EXPORT" `
                     -Message "Export CSV réconciliation : $($sfd.FileName) ($($csvData.Count) lignes)"

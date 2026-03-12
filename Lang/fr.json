@@ -516,7 +516,7 @@
     "reconcile_title": "Réconciliation — {0}",
     "reconcile_desc": "Le template a été modifié. {0} utilisateur(s) ont des écarts.",
     "reconcile_col_user": "Utilisateur",
-    "reconcile_col_missing": "Groupes manquants",
+    "reconcile_col_missing": "Écarts (+ manquant / - à retirer)",
     "reconcile_btn_apply": "Réconcilier tous",
     "reconcile_btn_export": "Exporter la liste",
     "reconcile_success": "{0} utilisateur(s) réconcilié(s).",

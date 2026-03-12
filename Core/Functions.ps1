@@ -907,17 +907,9 @@ function Get-ProfileReconciliation {
     <#
     .SYNOPSIS
         Compare les utilisateurs associés à un profil avec sa définition actuelle.
-        Identifie les écarts : groupes du template manquants chez certains users.
-
-    .DESCRIPTION
-        Stratégie batch (O(N) appels Graph, N = nb de groupes dans le profil) :
-        1. Pour chaque groupe du profil, récupère ses membres via Get-MgGroupMember.
-        2. Construit un dictionnaire userId → { UPN, DisplayName, groupes présents }.
-        3. Retourne les users qui sont dans AU MOINS 1 groupe du profil
-           mais à qui il MANQUE au moins 1 groupe.
-
-        Cela détecte les users existants qui n'ont pas reçu un groupe
-        récemment ajouté au template.
+        Détecte les écarts bidirectionnels :
+        - Groupes du template MANQUANTS chez certains users (à ajouter)
+        - Groupes retirés du template (_pending_removals) encore PRÉSENTS chez des users (à retirer)
 
     .PARAMETER ProfileKey
         Clé technique du profil à analyser (ex: "Finance").
@@ -926,16 +918,12 @@ function Get-ProfileReconciliation {
         Nombre minimum de groupes du profil que l'utilisateur doit posséder
         pour être considéré comme "associé" au profil. Par défaut : -1
         (= totalGroupes - 1, soit tolérance d'un seul groupe manquant).
-        Mettre 1 pour attraper tous les users qui ont au moins 1 groupe du profil.
 
     .OUTPUTS
         [PSCustomObject] — {
-            ProfileKey:      string
-            ProfileName:     string
-            TotalGroups:     int
-            Discrepancies:   [PSCustomObject[]] — { UserId, UPN, DisplayName, Missing[] }
-            TotalUsers:      int  (nombre d'utilisateurs analysés)
-            Error:           string | $null
+            ProfileKey, ProfileName, TotalGroups,
+            Discrepancies   : [PSCustomObject[]] — { UserId, UPN, DisplayName, Missing[], MissingIds[], ToRemove[], ToRemoveIds[] }
+            TotalUsers, Error
         }
     #>
     [CmdletBinding()]
@@ -949,23 +937,16 @@ function Get-ProfileReconciliation {
     # Validation
     if (-not $Config.PSObject.Properties["access_profiles"]) {
         return [PSCustomObject]@{
-            ProfileKey    = $ProfileKey
-            ProfileName   = ""
-            TotalGroups   = 0
-            Discrepancies = @()
-            TotalUsers    = 0
-            Error         = "Aucune section access_profiles dans la configuration."
+            ProfileKey = $ProfileKey; ProfileName = ""; TotalGroups = 0
+            Discrepancies = @(); TotalUsers = 0
+            Error = "Aucune section access_profiles dans la configuration."
         }
     }
-
     if (-not $Config.access_profiles.PSObject.Properties[$ProfileKey]) {
         return [PSCustomObject]@{
-            ProfileKey    = $ProfileKey
-            ProfileName   = ""
-            TotalGroups   = 0
-            Discrepancies = @()
-            TotalUsers    = 0
-            Error         = "Profil '$ProfileKey' introuvable."
+            ProfileKey = $ProfileKey; ProfileName = ""; TotalGroups = 0
+            Discrepancies = @(); TotalUsers = 0
+            Error = "Profil '$ProfileKey' introuvable."
         }
     }
 
@@ -973,36 +954,41 @@ function Get-ProfileReconciliation {
     $profileGroups = @($ap.groups)
     $totalGroups   = $profileGroups.Count
 
-    if ($totalGroups -eq 0) {
+    # Groupes en attente de retrait
+    $pendingRemovals = @()
+    if ($ap.PSObject.Properties["_pending_removals"]) {
+        $pendingRemovals = @($ap._pending_removals)
+    }
+
+    if ($totalGroups -eq 0 -and $pendingRemovals.Count -eq 0) {
         return [PSCustomObject]@{
-            ProfileKey    = $ProfileKey
-            ProfileName   = $ap.display_name
-            TotalGroups   = 0
-            Discrepancies = @()
-            TotalUsers    = 0
-            Error         = $null
+            ProfileKey = $ProfileKey; ProfileName = $ap.display_name; TotalGroups = 0
+            Discrepancies = @(); TotalUsers = 0; Error = $null
         }
     }
 
     # Seuil par défaut : l'utilisateur doit avoir au moins (N-1) groupes
-    if ($MinGroupThreshold -le 0) {
+    if ($MinGroupThreshold -le 0 -and $totalGroups -gt 0) {
         $MinGroupThreshold = [Math]::Max(1, $totalGroups - 1)
+    }
+    elseif ($MinGroupThreshold -le 0) {
+        $MinGroupThreshold = 1
     }
 
     Write-Log -Level "INFO" -Action "RECONCILE_SCAN" `
-        -Message "Scan réconciliation profil '$ProfileKey' ($totalGroups groupes, seuil=$MinGroupThreshold)"
+        -Message "Scan réconciliation profil '$ProfileKey' ($totalGroups groupes, $($pendingRemovals.Count) retrait(s) en attente, seuil=$MinGroupThreshold)"
 
     try {
-        # Dictionnaire : userId → { UPN, DisplayName, PresentGroupIds = HashSet }
+        # ============================
+        # PASS 1 : Groupes manquants (existant)
+        # ============================
         $userMap = @{}
 
         foreach ($grp in $profileGroups) {
             try {
                 $members = Get-MgGroupMember -GroupId $grp.id -All -ErrorAction Stop
                 foreach ($member in $members) {
-                    # Filtrer : uniquement les utilisateurs (pas les devices, groupes imbriqués, etc.)
                     if ($member.AdditionalProperties.'@odata.type' -ne '#microsoft.graph.user') { continue }
-
                     $uid = $member.Id
                     if (-not $userMap.ContainsKey($uid)) {
                         $userMap[$uid] = @{
@@ -1020,45 +1006,115 @@ function Get-ProfileReconciliation {
             }
         }
 
-        # Identifier les écarts
-        $discrepancies = @()
         $profileGroupIds = @($profileGroups | ForEach-Object { $_.id })
 
-        foreach ($uid in $userMap.Keys) {
-            $entry = $userMap[$uid]
-            $presentCount = $entry.PresentGroupIds.Count
+        # ============================
+        # PASS 2 : Groupes à retirer (_pending_removals)
+        # ============================
+        # Dictionnaire : userId → liste des groupes obsolètes encore présents
+        $removalMap = @{}
 
-            # L'utilisateur doit être dans au moins $MinGroupThreshold groupes
-            # ET il doit lui manquer au moins 1 groupe
-            if ($presentCount -ge $MinGroupThreshold -and $presentCount -lt $totalGroups) {
-                $missingIds = @($profileGroupIds | Where-Object { -not $entry.PresentGroupIds.Contains($_) })
-                $missingNames = @($missingIds | ForEach-Object {
-                    $gid = $_
-                    ($profileGroups | Where-Object { $_.id -eq $gid }).display_name
-                })
+        foreach ($rGrp in $pendingRemovals) {
+            try {
+                $members = Get-MgGroupMember -GroupId $rGrp.id -All -ErrorAction Stop
+                foreach ($member in $members) {
+                    if ($member.AdditionalProperties.'@odata.type' -ne '#microsoft.graph.user') { continue }
+                    $uid = $member.Id
 
+                    # Ne flagger que les users qui sont AUSSI dans le profil courant (au moins 1 groupe)
+                    # OU qui étaient dans le userMap (= associés au profil)
+                    $isProfileUser = $userMap.ContainsKey($uid)
+                    if (-not $isProfileUser -and $totalGroups -gt 0) {
+                        # Pas associé au profil courant → ignorer (le groupe peut être attribué indépendamment)
+                        continue
+                    }
+
+                    if (-not $removalMap.ContainsKey($uid)) {
+                        $removalMap[$uid] = @{
+                            UPN          = $member.AdditionalProperties.userPrincipalName
+                            DisplayName  = $member.AdditionalProperties.displayName
+                            ToRemoveIds  = @()
+                            ToRemoveNames = @()
+                        }
+                    }
+                    $removalMap[$uid].ToRemoveIds  += $rGrp.id
+                    $removalMap[$uid].ToRemoveNames += $rGrp.display_name
+                }
+            }
+            catch {
+                Write-Log -Level "WARNING" -Action "RECONCILE_SCAN" `
+                    -Message "Impossible de lire les membres du groupe retiré '$($rGrp.display_name)' ($($rGrp.id)) : $($_.Exception.Message)"
+            }
+        }
+
+        # ============================
+        # MERGE : Construire les écarts combinés
+        # ============================
+        $discrepancies = @()
+        $allUserIds = [System.Collections.Generic.HashSet[string]]::new()
+
+        # Ajouter tous les userIds des deux maps
+        foreach ($uid in $userMap.Keys) { [void]$allUserIds.Add($uid) }
+        foreach ($uid in $removalMap.Keys) { [void]$allUserIds.Add($uid) }
+
+        foreach ($uid in $allUserIds) {
+            $missingNames = @()
+            $missingIds   = @()
+            $toRemoveNames = @()
+            $toRemoveIds   = @()
+            $upn = ""
+            $displayName = ""
+
+            # Check groupes manquants
+            if ($userMap.ContainsKey($uid)) {
+                $entry = $userMap[$uid]
+                $upn = $entry.UPN
+                $displayName = $entry.DisplayName
+                $presentCount = $entry.PresentGroupIds.Count
+
+                if ($presentCount -ge $MinGroupThreshold -and $presentCount -lt $totalGroups) {
+                    $missingIds = @($profileGroupIds | Where-Object { -not $entry.PresentGroupIds.Contains($_) })
+                    $missingNames = @($missingIds | ForEach-Object {
+                        $gid = $_
+                        ($profileGroups | Where-Object { $_.id -eq $gid }).display_name
+                    })
+                }
+            }
+
+            # Check groupes à retirer
+            if ($removalMap.ContainsKey($uid)) {
+                $rEntry = $removalMap[$uid]
+                if (-not $upn) { $upn = $rEntry.UPN }
+                if (-not $displayName) { $displayName = $rEntry.DisplayName }
+                $toRemoveIds   = $rEntry.ToRemoveIds
+                $toRemoveNames = $rEntry.ToRemoveNames
+            }
+
+            # N'ajouter que s'il y a au moins un écart
+            if ($missingIds.Count -gt 0 -or $toRemoveIds.Count -gt 0) {
                 $discrepancies += [PSCustomObject]@{
                     UserId      = $uid
-                    UPN         = $entry.UPN
-                    DisplayName = $entry.DisplayName
+                    UPN         = $upn
+                    DisplayName = $displayName
                     Missing     = $missingNames
                     MissingIds  = $missingIds
+                    ToRemove    = $toRemoveNames
+                    ToRemoveIds = $toRemoveIds
                 }
             }
         }
 
-        # Trier par UPN pour lisibilité
         $discrepancies = @($discrepancies | Sort-Object -Property UPN)
 
         Write-Log -Level "INFO" -Action "RECONCILE_SCAN" `
-            -Message "Résultat : $($userMap.Count) utilisateurs analysés, $($discrepancies.Count) écart(s) détecté(s)"
+            -Message "Résultat : $($allUserIds.Count) utilisateurs, $($discrepancies.Count) écart(s) (manquants + retraits)"
 
         return [PSCustomObject]@{
             ProfileKey    = $ProfileKey
             ProfileName   = $ap.display_name
             TotalGroups   = $totalGroups
             Discrepancies = $discrepancies
-            TotalUsers    = $userMap.Count
+            TotalUsers    = $allUserIds.Count
             Error         = $null
         }
     }
@@ -1066,12 +1122,8 @@ function Get-ProfileReconciliation {
         $errMsg = $_.Exception.Message
         Write-Log -Level "ERROR" -Action "RECONCILE_SCAN" -Message "Erreur réconciliation : $errMsg"
         return [PSCustomObject]@{
-            ProfileKey    = $ProfileKey
-            ProfileName   = $ap.display_name
-            TotalGroups   = $totalGroups
-            Discrepancies = @()
-            TotalUsers    = 0
-            Error         = $errMsg
+            ProfileKey = $ProfileKey; ProfileName = $ap.display_name; TotalGroups = $totalGroups
+            Discrepancies = @(); TotalUsers = 0; Error = $errMsg
         }
     }
 }

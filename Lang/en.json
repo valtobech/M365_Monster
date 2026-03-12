@@ -515,7 +515,7 @@
     "reconcile_title": "Reconciliation — {0}",
     "reconcile_desc": "The template has been modified. {0} user(s) have discrepancies.",
     "reconcile_col_user": "User",
-    "reconcile_col_missing": "Missing groups",
+    "reconcile_col_missing": "Discrepancies (+ missing / - to remove)",
     "reconcile_btn_apply": "Reconcile all",
     "reconcile_btn_export": "Export list",
     "reconcile_success": "{0} user(s) reconciled.",
