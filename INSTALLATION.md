@@ -38,6 +38,7 @@
    - `DeviceManagementConfiguration.Read.All` (audit Intune — policies config/compliance)
    - `DeviceManagementApps.Read.All` (audit Intune — applications)
    - `DeviceManagementManagedDevices.Read.All` (audit Intune — devices managés)
+   - `RoleManagement.ReadWrite.Directory` (gestion PIM — rôles et assignations)
 
 5. **Permissions Exchange Online** — le compte connecté doit avoir le rôle **Exchange Administrator** ou **Recipient Management** sur le tenant pour pouvoir exécuter `Set-Mailbox` (gestion des alias email).
 
@@ -80,18 +81,20 @@ C:\Program Files\M365Monster\
 ├── Core/                       # Modules fonctionnels
 │   ├── Config.ps1
 │   ├── Connect.ps1
-│   ├── Functions.ps1           # Utilitaires + fonctions profils d'accès
-│   ├── GraphAPI.ps1            # Wrappers Graph API + Search-AzGroups
+│   ├── Functions.ps1
+│   ├── GraphAPI.ps1
 │   ├── Lang.ps1
+│   ├── PIMFunctions.ps1
 │   └── Update.ps1
 ├── Modules/                    # Interfaces GUI
 │   ├── GUI_Main.ps1
-│   ├── GUI_Onboarding.ps1      # Formulaire d'arrivée (+ profils d'accès)
+│   ├── GUI_Onboarding.ps1
 │   ├── GUI_Offboarding.ps1
-│   ├── GUI_Modification.ps1    # Formulaire de modification (+ changement profils)
-│   ├── GUI_AccessProfiles.ps1  # Gestionnaire de profils d'accès + réconciliation
+│   ├── GUI_Modification.ps1
+│   ├── GUI_AccessProfiles.ps1
 │   ├── GUI_SharedMailboxAudit.ps1
 │   ├── GUI_NestedGroupAudit.ps1
+│   ├── GUI_PIMManager.ps1
 │   └── GUI_Settings.ps1
 ├── Lang/                       # Fichiers de langue
 │   ├── fr.json
@@ -99,7 +102,7 @@ C:\Program Files\M365Monster\
 ├── Scripts/                    # Scripts externes
 ├── Assets/                     # Icônes et ressources
 └── Clients/                    # Configurations client (préservé lors des MAJ)
-    └── _Template.json          # Template avec profils d'accès par défaut
+    └── _Template.json
 ```
 
 ### Données utilisateur
@@ -141,7 +144,7 @@ Les logs, préférences et données de cache sont stockés dans `%APPDATA%\M365M
 }
 ```
 
-> Voir le [Guide de configuration](CONFIGURATION.md) pour la référence complète de tous les champs, incluant les profils d'accès.
+> Voir le [Guide de configuration](GUIDE_CONFIGURATION.md) pour la référence complète de tous les champs.
 
 ---
 
@@ -154,7 +157,7 @@ Double-cliquer **M365 Monster** sur le Bureau.
 3. S'authentifier via le navigateur (MFA supporté) — **deux authentifications successives** :
    - Microsoft Graph (Entra ID) — popup navigateur
    - Exchange Online — popup navigateur (même compte, peut s'enchaîner automatiquement)
-4. Utiliser les 8 tuiles du menu principal :
+4. Utiliser les 10 tuiles du menu principal :
    - **Onboarding** — Créer un nouveau compte employé (avec profils d'accès)
    - **Offboarding** — Gérer le départ d'un employé
    - **Modification** — Modifier les attributs d'un employé (changement de profils)
@@ -163,15 +166,8 @@ Double-cliquer **M365 Monster** sur le Bureau.
    - **Paramétrage** — Gérer les configurations client et les profils d'accès
    - **Audit Shared Mailbox** — Auditer les BAL partagées (comptes, licences, sign-in)
    - **Groupes mixtes (Nested)** — Audit des groupes Entra contenant Users + Devices, impact Intune
-
-### Profils d'accès
-
-Les profils d'accès permettent de standardiser l'attribution des groupes Entra ID par rôle ou département. Chaque profil est un package de groupes :
-
-- **Configurer** : Paramétrage → Gestion des profils d'accès → créer/éditer des profils, rechercher des groupes Entra, définir un profil baseline
-- **Onboarding** : le profil baseline s'applique automatiquement. Les profils additionnels sont sélectionnables. Bouton « Prévisualiser » pour vérifier avant création.
-- **Modification** : changer les profils d'un employé existant avec diff intelligent (seuls les ajouts/retraits nécessaires sont exécutés)
-- **Réconcilier** : détecter et corriger les écarts entre les profils templates et les utilisateurs en production
+   - **Profils d'accès** — Gérer les profils d'accès composables et la réconciliation
+   - **PIM Manager** — Gestion des groupes de rôles PIM (création, audit, mise à jour)
 
 ---
 
@@ -231,4 +227,3 @@ Le désinstallateur :
 | Alias email — "La session Exchange Online n'est pas active" | Connexion EXO échouée au démarrage | Fermer et relancer l'outil ; vérifier que le compte a le rôle Exchange Administrator |
 | Alias email — erreur 400 ou "access denied" via Set-Mailbox | Permissions Exchange insuffisantes | Attribuer le rôle **Recipient Management** ou **Exchange Administrator** au compte dans EAC |
 | Module ExchangeOnlineManagement absent | Non installé ou installation échouée | Exécuter manuellement : `Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force` |
-| Profils d'accès — section absente dans l'onboarding | Le JSON client n'a pas de section `access_profiles` | Configurer via Paramétrage → Gestion des profils d'accès, ou copier la section depuis `_Template.json` |

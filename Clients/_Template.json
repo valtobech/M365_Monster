@@ -81,5 +81,37 @@
     "length": 14,
     "force_change_at_login": true,
     "include_special_chars": true
+  },
+
+  "pim_role_groups": {
+    "PIM_Role_Communs_Fixe": {
+      "description": "Fixed common roles - all IT members",
+      "type": "Role_Fixe",
+      "roles": [
+        "Global Reader",
+        "Reports Reader",
+        "Message Center Reader",
+        "Service Support Administrator"
+      ]
+    },
+    "PIM_Groupe_TechnicienN1": {
+      "description": "N1 Support - Internal technicians",
+      "type": "Groupe",
+      "roles": [
+        "User Administrator",
+        "Helpdesk Administrator",
+        "Authentication Administrator",
+        "Cloud Device Administrator"
+      ]
+    },
+    "PIM_Role_Admin": {
+      "description": "Senior admins - individual elevation",
+      "type": "Role",
+      "roles": [
+        "License Administrator",
+        "Security Operator",
+        "Authentication Administrator"
+      ]
+    }
   }
 }

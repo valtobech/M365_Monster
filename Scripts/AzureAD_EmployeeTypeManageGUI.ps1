@@ -345,7 +345,12 @@ Add-Type -AssemblyName System.Windows.Forms
                             <TextBlock Text="TITRE" FontSize="10" FontWeight="Bold"
                                        Foreground="#64748b" Margin="0,0,0,6"/>
                             <TextBox x:Name="txtFilterTitle" Style="{StaticResource ModernTextBox}"
-                                     ToolTip="Filtrer par titre..." Margin="0,0,0,12"/>
+                                     ToolTip="Filtrer par titre..." Margin="0,0,0,10"/>
+
+                            <TextBlock Text="MANAGER" FontSize="10" FontWeight="Bold"
+                                       Foreground="#64748b" Margin="0,0,0,6"/>
+                            <TextBox x:Name="txtFilterManager" Style="{StaticResource ModernTextBox}"
+                                     ToolTip="Filtrer par manager..." Margin="0,0,0,12"/>
 
                             <TextBlock Text="TYPE DE COMPTE" FontSize="10" FontWeight="Bold"
                                        Foreground="#64748b" Margin="0,0,0,10"/>
@@ -354,6 +359,10 @@ Add-Type -AssemblyName System.Windows.Forms
                             <TextBlock Text="STATUT DU COMPTE" FontSize="10" FontWeight="Bold"
                                        Foreground="#64748b" Margin="0,12,0,10"/>
                             <ComboBox x:Name="cboAccountStatus" Style="{StaticResource ModernComboBox}"/>
+
+                            <TextBlock Text="INACTIVITÉ (DERNIÈRE CONNEXION)" FontSize="10" FontWeight="Bold"
+                                       Foreground="#64748b" Margin="0,12,0,10"/>
+                            <ComboBox x:Name="cboInactivity" Style="{StaticResource ModernComboBox}"/>
                         </StackPanel>
                     </Border>
 
@@ -512,8 +521,10 @@ Add-Type -AssemblyName System.Windows.Forms
                             <DataGridTextColumn Header="DÉPARTEMENT" Binding="{Binding Department}" Width="140"/>
                             <DataGridTextColumn Header="TITRE" Binding="{Binding JobTitle}" Width="140"/>
                             <DataGridTextColumn Header="EMPLOYEE TYPE" Binding="{Binding EmployeeType}" Width="140"/>
+                            <DataGridTextColumn Header="MANAGER" Binding="{Binding Manager}" Width="160"/>
                             <DataGridTextColumn Header="TYPE COMPTE" Binding="{Binding UserType}" Width="100"/>
                             <DataGridTextColumn Header="ACTIVÉ" Binding="{Binding AccountEnabled}" Width="80"/>
+                            <DataGridTextColumn Header="DERNIÈRE CONNEXION" Binding="{Binding LastSignInDisplay}" Width="140"/>
                         </DataGrid.Columns>
                     </DataGrid>
                 </Border>
@@ -577,6 +588,7 @@ $script:AllUsers = @()
 $script:FilteredUsers = @()
 $script:IsConnected = $false
 $script:ExternalSession = $false
+$script:SignInAvailable = $false
 $script:Categories = [System.Collections.ObjectModel.ObservableCollection[string]]::new()
 
 # Default categories
@@ -615,7 +627,7 @@ function Connect-ToGraph {
         $context = Get-MgContext
         if ($null -eq $context) {
             # Pas de session — connexion interactive
-            Connect-MgGraph -Scopes "User.ReadWrite.All", "Directory.Read.All" -ErrorAction Stop
+            Connect-MgGraph -Scopes "User.ReadWrite.All", "Directory.Read.All", "AuditLog.Read.All" -ErrorAction Stop
             $context = Get-MgContext
             $script:ExternalSession = $false
         }
@@ -662,7 +674,7 @@ function Connect-ToGraph {
 }
 
 # ============================================================
-# ENTRA ID DATA RETRIEVAL
+# ENTRA ID DATA RETRIEVAL (Two-Pass Strategy)
 # ============================================================
 function Get-EntraUserData {
     if (-not $script:IsConnected) {
@@ -670,14 +682,104 @@ function Get-EntraUserData {
         return
     }
 
-    $txtStatus.Text = "Chargement des utilisateurs Entra ID (pagination automatique)..."
+    $txtStatus.Text = "Chargement des utilisateurs Entra ID (Pass 1/3 - Propriétés de base)..."
     $window.Dispatcher.Invoke([action]{}, [System.Windows.Threading.DispatcherPriority]::Render)
 
     try {
-        # Retrieve all users with pagination via -All
-        # Properties: Id, DisplayName, UserPrincipalName, Department, JobTitle, EmployeeType, AccountEnabled, UserType
+        # ── Pass 1 : Propriétés de base via SDK (v1.0, léger) ──
         $mgUsers = Get-MgUser -All -Property Id, DisplayName, UserPrincipalName, Mail, Department, JobTitle, EmployeeType, AccountEnabled, UserType -ConsistencyLevel eventual -CountVariable totalCount -ErrorAction Stop
 
+        # ── Pass 2 : signInActivity via beta endpoint (propriété coûteuse) ──
+        $txtStatus.Text = "Chargement (Pass 2/3 - Données de connexion via beta)..."
+        $window.Dispatcher.Invoke([action]{}, [System.Windows.Threading.DispatcherPriority]::Render)
+
+        $signInLookup = @{}
+        $script:SignInAvailable = $false
+
+        try {
+            $betaUri = 'https://graph.microsoft.com/beta/users?$select=id,signInActivity&$top=999'
+            $betaPageCount = 0
+
+            while ($betaUri) {
+                $betaPageCount++
+                $txtStatus.Text = "Chargement signInActivity (page $betaPageCount)..."
+                $window.Dispatcher.Invoke([action]{}, [System.Windows.Threading.DispatcherPriority]::Render)
+
+                $response = Invoke-MgGraphRequest -Uri $betaUri -Method GET -Headers @{ 'ConsistencyLevel' = 'eventual' } -ErrorAction Stop
+
+                foreach ($u in $response.value) {
+                    if ($u.signInActivity -and $u.signInActivity.lastSignInDateTime) {
+                        $signInLookup[$u.id] = $u.signInActivity.lastSignInDateTime
+                    }
+                }
+
+                $betaUri = $response.'@odata.nextLink'
+
+                # Anti-throttling : délai entre les pages de pagination
+                if ($betaUri) { Start-Sleep -Milliseconds 150 }
+            }
+
+            # Vérifier si au moins un résultat a été retourné (licence P1/P2 requise)
+            if ($signInLookup.Count -gt 0) {
+                $script:SignInAvailable = $true
+            }
+        }
+        catch {
+            # signInActivity non disponible (pas de licence Entra ID P1/P2 ou permissions insuffisantes)
+            $signInLookup = @{}
+            $script:SignInAvailable = $false
+        }
+
+        # ── Pass 3 : Managers via Graph batch (v1.0, relation $expand non dispo en bulk) ──
+        $txtStatus.Text = "Chargement (Pass 3/3 - Managers via batch)..."
+        $window.Dispatcher.Invoke([action]{}, [System.Windows.Threading.DispatcherPriority]::Render)
+
+        $managerLookup = @{}
+        try {
+            $userIds = @($mgUsers | Select-Object -ExpandProperty Id)
+            $batchSize = 20  # Limite Graph API par requête batch
+            $batchNum = 0
+            $totalBatches = [math]::Ceiling($userIds.Count / $batchSize)
+
+            for ($i = 0; $i -lt $userIds.Count; $i += $batchSize) {
+                $batchNum++
+                $txtStatus.Text = "Chargement managers (batch $batchNum/$totalBatches)..."
+                $window.Dispatcher.Invoke([action]{}, [System.Windows.Threading.DispatcherPriority]::Render)
+
+                $chunk = $userIds[$i..([math]::Min($i + $batchSize - 1, $userIds.Count - 1))]
+                $requests = @()
+                $requestIndex = 0
+
+                foreach ($uid in $chunk) {
+                    $requests += @{
+                        id     = "$requestIndex"
+                        method = "GET"
+                        url    = "/users/$uid/manager?`$select=displayName"
+                    }
+                    $requestIndex++
+                }
+
+                $batchBody = @{ requests = $requests } | ConvertTo-Json -Depth 5
+                $batchResponse = Invoke-MgGraphRequest -Uri 'https://graph.microsoft.com/v1.0/$batch' -Method POST -Body $batchBody -ContentType 'application/json' -ErrorAction Stop
+
+                foreach ($resp in $batchResponse.responses) {
+                    $reqId = [int]$resp.id
+                    $uid = $chunk[$reqId]
+                    if ($resp.status -eq 200 -and $resp.body.displayName) {
+                        $managerLookup[$uid] = $resp.body.displayName
+                    }
+                    # 404 = pas de manager assigné, on ignore silencieusement
+                }
+
+                # Anti-throttling : délai entre les batches
+                if (($i + $batchSize) -lt $userIds.Count) { Start-Sleep -Milliseconds 150 }
+            }
+        }
+        catch {
+            # Erreur non bloquante — on continue sans les managers
+        }
+
+        # ── Fusion des trois passes ──
         $entraUsers = $mgUsers | Select-Object `
             @{N='EntraId';E={$_.Id}},
             @{N='DisplayName';E={if($_.DisplayName){$_.DisplayName}else{'(Sans nom)'}}},
@@ -686,12 +788,25 @@ function Get-EntraUserData {
             Department,
             JobTitle,
             EmployeeType,
+            @{N='Manager';E={
+                if ($managerLookup.ContainsKey($_.Id)) { $managerLookup[$_.Id] } else { '' }
+            }},
             @{N='AccountEnabled';E={if($_.AccountEnabled){'Oui'}else{'Non'}}},
-            @{N='UserType';E={$_.UserType}}
+            @{N='UserType';E={$_.UserType}},
+            @{N='LastSignIn';E={
+                if ($signInLookup.ContainsKey($_.Id)) {
+                    [datetime]$signInLookup[$_.Id]
+                } else { $null }
+            }},
+            @{N='LastSignInDisplay';E={
+                if ($signInLookup.ContainsKey($_.Id)) {
+                    try { ([datetime]$signInLookup[$_.Id]).ToString('yyyy-MM-dd') } catch { 'Erreur' }
+                } else { 'Jamais' }
+            }}
 
         $script:AllUsers = @($entraUsers)
 
-        # Discover existing EmployeeType values from Entra
+        # Découvrir les valeurs EmployeeType existantes
         $existingTypes = $script:AllUsers |
             Where-Object { $_.EmployeeType -and $_.EmployeeType -ne '' } |
             Select-Object -ExpandProperty EmployeeType -Unique
@@ -701,7 +816,8 @@ function Get-EntraUserData {
             }
         }
 
-        $txtStatus.Text = "Chargé : $($script:AllUsers.Count) utilisateur(s) depuis Entra ID"
+        $signInMsg = if ($script:SignInAvailable) { " | SignIn: OK" } else { " | SignIn: N/A (licence P1/P2 requise)" }
+        $txtStatus.Text = "Chargé : $($script:AllUsers.Count) utilisateur(s) depuis Entra ID$signInMsg"
     }
     catch {
         [System.Windows.MessageBox]::Show(
@@ -941,6 +1057,7 @@ function Update-UserGrid {
     $filterName = $txtFilterName.Text.Trim().ToLower()
     $filterDept = $txtFilterDept.Text.Trim().ToLower()
     $filterTitle = $txtFilterTitle.Text.Trim().ToLower()
+    $filterManager = $txtFilterManager.Text.Trim().ToLower()
     $userTypeFilter = $cboUserType.SelectedItem
     $accountStatusFilter = $cboAccountStatus.SelectedItem
 
@@ -987,6 +1104,44 @@ function Update-UserGrid {
         $filtered = @($filtered | Where-Object {
             $_.JobTitle -and $_.JobTitle.ToLower().Contains($filterTitle)
         })
+    }
+    if ($filterManager) {
+        $filtered = @($filtered | Where-Object {
+            $_.Manager -and $_.Manager.ToLower().Contains($filterManager)
+        })
+    }
+
+    # Filtre d'inactivité (dernière connexion)
+    $inactivityFilter = $cboInactivity.SelectedItem
+    if ($inactivityFilter -and $inactivityFilter -ne "-- Tous --") {
+        $now = Get-Date
+        switch ($inactivityFilter) {
+            "Inactif 30+ jours" {
+                $filtered = @($filtered | Where-Object {
+                    $null -eq $_.LastSignIn -or ($now - $_.LastSignIn).TotalDays -gt 30
+                })
+            }
+            "Inactif 90+ jours" {
+                $filtered = @($filtered | Where-Object {
+                    $null -eq $_.LastSignIn -or ($now - $_.LastSignIn).TotalDays -gt 90
+                })
+            }
+            "Inactif 180+ jours" {
+                $filtered = @($filtered | Where-Object {
+                    $null -eq $_.LastSignIn -or ($now - $_.LastSignIn).TotalDays -gt 180
+                })
+            }
+            "Inactif 365+ jours" {
+                $filtered = @($filtered | Where-Object {
+                    $null -eq $_.LastSignIn -or ($now - $_.LastSignIn).TotalDays -gt 365
+                })
+            }
+            "Actif derniers 30 jours" {
+                $filtered = @($filtered | Where-Object {
+                    $null -ne $_.LastSignIn -and ($now - $_.LastSignIn).TotalDays -le 30
+                })
+            }
+        }
     }
 
     $script:FilteredUsers = $filtered
@@ -1084,6 +1239,11 @@ $cboAccountStatus.Add_SelectionChanged({
     Update-UserGrid
 })
 
+# Inactivity filter change (dernière connexion)
+$cboInactivity.Add_SelectionChanged({
+    Update-UserGrid
+})
+
 # Column text filters
 $txtFilterName.Add_TextChanged({
     Update-UserGrid
@@ -1094,6 +1254,10 @@ $txtFilterDept.Add_TextChanged({
 })
 
 $txtFilterTitle.Add_TextChanged({
+    Update-UserGrid
+})
+
+$txtFilterManager.Add_TextChanged({
     Update-UserGrid
 })
 
@@ -1337,7 +1501,7 @@ $btnExportReport.Add_Click({
 
     if ($dialog.ShowDialog() -eq "OK") {
         try {
-            $script:AllUsers | Select-Object EntraId, DisplayName, UPN, Mail, Department, JobTitle, EmployeeType, AccountEnabled, UserType |
+            $script:AllUsers | Select-Object EntraId, DisplayName, UPN, Mail, Department, JobTitle, EmployeeType, Manager, AccountEnabled, UserType, LastSignInDisplay |
                 Export-Csv -Path $dialog.FileName -NoTypeInformation -Encoding UTF8
 
             $total = $script:AllUsers.Count
@@ -1390,6 +1554,15 @@ $window.Add_Loaded({
     $cboAccountStatus.Items.Add("Actif") | Out-Null
     $cboAccountStatus.Items.Add("Inactif") | Out-Null
     $cboAccountStatus.SelectedIndex = 0
+
+    # Populate Inactivity filter (dernière connexion)
+    $cboInactivity.Items.Add("-- Tous --") | Out-Null
+    $cboInactivity.Items.Add("Actif derniers 30 jours") | Out-Null
+    $cboInactivity.Items.Add("Inactif 30+ jours") | Out-Null
+    $cboInactivity.Items.Add("Inactif 90+ jours") | Out-Null
+    $cboInactivity.Items.Add("Inactif 180+ jours") | Out-Null
+    $cboInactivity.Items.Add("Inactif 365+ jours") | Out-Null
+    $cboInactivity.SelectedIndex = 0
 
     Update-CategoryLists
 })

@@ -104,7 +104,7 @@ function Connect-GraphAPI {
         return [PSCustomObject]@{ Success = $false; Error = "Module Microsoft.Graph non disponible." }
     }
 
-    # Scopes nécessaires pour les opérations RH + Intune (delegated permissions)
+    # Scopes nécessaires pour les opérations RH + Intune + PIM (delegated permissions)
     $scopes = @(
         "User.ReadWrite.All",
         "Group.ReadWrite.All",
@@ -113,7 +113,8 @@ function Connect-GraphAPI {
         "Device.Read.All",
         "DeviceManagementConfiguration.Read.All",
         "DeviceManagementApps.Read.All",
-        "DeviceManagementManagedDevices.Read.All"
+        "DeviceManagementManagedDevices.Read.All",
+        "RoleManagement.ReadWrite.Directory"
     )
 
     $tenantId = $Config.tenant_id

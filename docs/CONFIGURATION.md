@@ -1,6 +1,6 @@
 # Guide de configuration — M365 Monster
 
-> **Version :** 2.1 — Février 2026
+> **Version :** 3.0 — Mars 2026
 > **Public cible :** Techniciens IT / MSP qui déploient l'outil chez un nouveau client
 
 ---
@@ -12,10 +12,9 @@
 3. [Créer l'App Registration dans Entra ID](#3-créer-lapp-registration-dans-entra-id)
 4. [Méthodes d'authentification](#4-méthodes-dauthentification)
 5. [Référence complète du fichier JSON](#5-référence-complète-du-fichier-json)
-6. [Profils d'accès](#6-profils-daccès)
-7. [Exemple complet commenté](#7-exemple-complet-commenté)
-8. [Trouver les SKU de licences](#8-trouver-les-sku-de-licences)
-9. [Dépannage](#9-dépannage)
+6. [Exemple complet commenté](#6-exemple-complet-commenté)
+7. [Trouver les SKU de licences](#7-trouver-les-sku-de-licences)
+8. [Dépannage](#8-dépannage)
 
 ---
 
@@ -99,6 +98,7 @@ C'est l'étape la plus souvent oubliée :
 | `DeviceManagementConfiguration.Read.All` | Lecture des policies Intune (configuration, compliance, ADMX) |
 | `DeviceManagementApps.Read.All` | Lecture des applications Intune et leurs assignations |
 | `DeviceManagementManagedDevices.Read.All` | Lecture des devices managés Intune |
+| `RoleManagement.ReadWrite.Directory` | Gestion PIM : rôles, assignations eligible/active |
 
 3. Cliquer **Grant admin consent for [Tenant]** (bouton bleu en haut)
 4. Vérifier que chaque permission affiche ✅ **Granted**
@@ -314,75 +314,67 @@ Si `enabled` est `true`, un email est envoyé via Microsoft Graph aux destinatai
 | `force_change_at_login` | L'utilisateur devra changer son mot de passe à la première connexion |
 | `include_special_chars` | Inclure des caractères spéciaux (`!@#$%&*-_=+`) |
 
----
-
-## 6. Profils d'accès
-
-La section `access_profiles` est **optionnelle**. Si absente, les fonctionnalités de profils sont simplement masquées dans l'interface. Le `_Template.json` inclut 7 profils par défaut.
-
-### Structure
+### Profils d'accès
 
 ```json
 "access_profiles": {
-  "base_commune": {
+  "Common": {
     "display_name": "Base commune",
     "description": "Groupes appliqués automatiquement à tous les employés",
     "is_baseline": true,
-    "groups": [
-      { "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "display_name": "Tous-Employes" },
-      { "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "display_name": "VPN-Access" }
-    ]
+    "groups": ["GRP-Tous-Employes", "GRP-VPN-Access"]
   },
-  "finance": {
+  "Finance": {
     "display_name": "Finance",
-    "description": "Accès aux outils et ressources du département Finance",
+    "description": "Équipe comptabilité et finances",
     "is_baseline": false,
-    "groups": [
-      { "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "display_name": "FIN-SharePoint" },
-      { "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "display_name": "FIN-Teams" },
-      { "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "display_name": "FIN-Budget-App" }
-    ]
+    "groups": ["GRP-Finance-Drive", "GRP-Finance-Teams"]
   }
 }
 ```
 
-### Référence des champs
+| Champ | Description |
+|---|---|
+| `display_name` | Nom affiché dans l'interface |
+| `description` | Description du profil |
+| `is_baseline` | Si `true`, le profil est appliqué automatiquement à l'onboarding (un seul baseline autorisé) |
+| `groups` | Liste des `displayName` exacts des groupes Entra ID à assigner |
 
-| Champ | Type | Obligatoire | Description |
+### Groupes de rôles PIM
+
+```json
+"pim_role_groups": {
+  "PIM_Role_Communs_Fixe": {
+    "description": "Rôles fixes communs - tous les membres IT",
+    "type": "Role_Fixe",
+    "roles": ["Global Reader", "Reports Reader"]
+  },
+  "PIM_Groupe_TechnicienN1": {
+    "description": "Support N1 - Techniciens internes",
+    "type": "Groupe",
+    "roles": ["User Administrator", "Helpdesk Administrator"]
+  }
+}
+```
+
+| Champ | Description |
+|---|---|
+| `description` | Description du groupe PIM |
+| `type` | Type d'assignation : `Role_Fixe` (active permanente), `Groupe` (active via groupe), `Groupe_Critical` (active via groupe, rôles critiques), `Role` (eligible individuel) |
+| `roles` | Liste des noms de rôles Entra ID à assigner au groupe |
+
+**Types de groupes PIM :**
+
+| Type | Assignation | Durée par défaut | Usage |
 |---|---|---|---|
-| Clé du profil (ex: `finance`) | string | ✅ | Identifiant unique du profil. Pas d'espaces ni de caractères spéciaux. |
-| `display_name` | string | ✅ | Nom affiché dans l'interface |
-| `description` | string | ✅ | Description affichée à côté du nom dans les sélecteurs |
-| `is_baseline` | bool | ✅ | `true` = appliqué automatiquement à tous les employés (un seul baseline par client) |
-| `groups` | array | ✅ | Tableau d'objets `{id, display_name}` — groupes Entra ID composant le profil |
-| `groups[].id` | string (GUID) | ✅ | Object ID du groupe dans Entra ID |
-| `groups[].display_name` | string | ✅ | Nom du groupe (pour l'affichage dans l'interface) |
-
-### Configuration via l'interface (recommandé)
-
-La méthode la plus simple est d'utiliser le **Gestionnaire de profils d'accès** :
-
-1. Lancer M365 Monster → Paramétrage → **Gestion des profils d'accès**
-2. Cliquer **Nouveau profil** et saisir le nom
-3. Utiliser la recherche de groupes (interroge Entra ID en temps réel) pour ajouter les groupes au profil
-4. Cocher **Profil baseline** si ce profil doit s'appliquer à tous les employés
-5. Cliquer **Enregistrer** — le JSON client est mis à jour automatiquement
-
-Le gestionnaire permet aussi de :
-- **Réconcilier** un profil : détecter les utilisateurs auxquels il manque des groupes par rapport au template, et corriger en lot
-- **Supprimer** un profil existant
-- **Modifier** les groupes d'un profil (ajout/retrait)
-
-### Notes
-
-- Les `id` des groupes doivent correspondre aux Object ID Entra ID réels. Le gestionnaire les renseigne automatiquement lors de la recherche.
-- Si un groupe est supprimé dans Entra ID mais reste référencé dans un profil, l'ajout échouera silencieusement avec un log d'avertissement.
-- Un profil peut contenir 0 à N groupes. Un profil sans groupes est valide mais n'a aucun effet.
-- Le profil baseline est affiché en lecture seule dans l'onboarding et appliqué automatiquement — il n'est pas sélectionnable/décochable.
+| `Role_Fixe` | Active | noExpiration (ou max tenant) | Rôles read-only permanents (Global Reader, etc.) |
+| `Groupe` | Active | noExpiration (ou 6 mois max) | Rôles opérationnels activés via membership au groupe |
+| `Groupe_Critical` | Active | noExpiration (ou 6 mois max) | Rôles critiques (Exchange Admin, etc.) — même mécanique que Groupe |
+| `Role` | Eligible | noExpiration (ou 1 an max) | Rôles individuels activables à la demande dans le portail PIM |
 
 ---
 
-## 7. Exemple complet commenté
+## 6. Exemple complet commenté
 
 Voici un fichier prêt à l'emploi pour un client fictif. Copiez-le, remplacez les valeurs en `⬅` :
 
@@ -444,34 +436,13 @@ Voici un fichier prêt à l'emploi pour un client fictif. Copiez-le, remplacez l
     "length": 16,
     "force_change_at_login": true,
     "include_special_chars": true
-  },
-
-  "access_profiles": {
-    "base_commune": {
-      "display_name": "Base commune",
-      "description": "Groupes appliqués automatiquement à tous les employés",
-      "is_baseline": true,
-      "groups": [
-        { "id": "aaaaaaaa-0000-0000-0000-000000000001", "display_name": "Tous-Employes" },
-        { "id": "aaaaaaaa-0000-0000-0000-000000000002", "display_name": "VPN-Access" }
-      ]
-    },
-    "production": {
-      "display_name": "Production",
-      "description": "Accès aux outils de production et logistique",
-      "is_baseline": false,
-      "groups": [
-        { "id": "bbbbbbbb-0000-0000-0000-000000000001", "display_name": "PROD-SharePoint" },
-        { "id": "bbbbbbbb-0000-0000-0000-000000000002", "display_name": "PROD-Teams" }
-      ]
-    }
   }
 }
 ```
 
 ---
 
-## 8. Trouver les SKU de licences
+## 7. Trouver les SKU de licences
 
 Les SKU de licences ne sont pas évidents. Voici comment les trouver pour un tenant.
 
@@ -510,7 +481,7 @@ Le format est `NomTenant:SKU_PART_NUMBER`. Le `NomTenant` est souvent le nom de 
 
 ---
 
-## 9. Dépannage
+## 8. Dépannage
 
 ### "AADSTS50011: The redirect URI 'ms-appx-web://...' does not match"
 

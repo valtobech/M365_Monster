@@ -81,6 +81,7 @@ if (-not $langOk) {
 . "$script:RootPath\Core\Functions.ps1"
 . "$script:RootPath\Core\GraphAPI.ps1"
 . "$script:RootPath\Core\Connect.ps1"
+. "$script:RootPath\Core\PIMFunctions.ps1"
 
 # === Initialisation du fichier de log ===
 # Les logs sont stockés dans AppData pour eviter les problemes de permissions
@@ -269,6 +270,7 @@ if (-not $exoResult.Success) {
 . "$script:RootPath\Modules\GUI_SharedMailboxAudit.ps1"
 . "$script:RootPath\Modules\GUI_NestedGroupAudit.ps1"
 . "$script:RootPath\Modules\GUI_AccessProfiles.ps1"
+. "$script:RootPath\Modules\GUI_PIMManager.ps1"
 # GUI_Settings.ps1 déjà chargé avant le sélecteur de client
 
 # Étape 6 : Affichage de la fenêtre principale

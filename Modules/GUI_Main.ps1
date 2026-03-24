@@ -19,7 +19,7 @@
 function Show-MainWindow {
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "$(Get-Text 'app.name') — $($Config.client_name)"
-    $form.Size = New-Object System.Drawing.Size(820, 948)
+    $form.Size = New-Object System.Drawing.Size(820, 1060)
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = "FixedSingle"
     $form.MaximizeBox = $false
@@ -88,7 +88,7 @@ function Show-MainWindow {
     $panelHeader.Controls.Add($btnDeconnexion)
 
     # =================================================================
-    # Grille de tuiles — 2 colonnes × 4 lignes
+    # Grille de tuiles — 2 colonnes × 5 lignes
     # =================================================================
     $yStart  = 130
     $btnW    = 350
@@ -230,6 +230,17 @@ function Show-MainWindow {
     }
     $form.Controls.Add($tileNestedAudit)
 
+    # LIGNE 5
+    $row5Y = $row4Y + $btnH + $spacingV
+
+    $tilePimManager = New-MenuTile -Text (Get-Text "main_menu.tile_pim_manager") -SubText (Get-Text "main_menu.tile_pim_manager_desc") `
+        -X $leftCol -Y $row5Y -Color ([System.Drawing.Color]::FromArgb(111, 66, 193))
+    Set-TileAction -Panel $tilePimManager -Action {
+        Write-Log -Level "INFO" -Action "GUI" -Message "Ouverture du gestionnaire PIM."
+        Show-PIMManagerForm
+    }
+    $form.Controls.Add($tilePimManager)
+
     # =================================================================
     # Barre de statut et pied de page
     # =================================================================
@@ -243,7 +254,7 @@ function Show-MainWindow {
     $lblFooter.Text = Get-Text "app.footer"
     $lblFooter.Font = New-Object System.Drawing.Font("Segoe UI", 8)
     $lblFooter.ForeColor = [System.Drawing.Color]::FromArgb(173, 181, 189)
-    $lblFooter.Location = New-Object System.Drawing.Point(25, 868)
+    $lblFooter.Location = New-Object System.Drawing.Point(25, 978)
     $lblFooter.Size = New-Object System.Drawing.Size(450, 20)
     $lblFooter.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
     $form.Controls.Add($lblFooter)

@@ -6,66 +6,92 @@ Versioning selon [Semantic Versioning](https://semver.org/lang/fr/).
 
 ---
 
+## [0.1.8] — 2026-03-24
+
+### Ajouté
+
+**Nouveau module — Gestionnaire PIM (`GUI_PIMManager.ps1` + `PIMFunctions.ps1`)**
+
+- **Dashboard interactif** : les groupes PIM sont affichés sous forme de cartes empilées dans un ScrollPanel avec bordure colorée à gauche et pastille de statut. Couleurs selon l'état : vert (OK), orange (Drift), rouge (Missing/Error), gris (Pending). Compteur résumé en haut du panneau (ex : « 3 OK | 2 Drift | 1 Missing »).
+- **Éditeur de groupes PIM** : panneau droit complet avec nom éditable, description, type (ComboBox : `Role_Fixe` / `Groupe` / `Groupe_Critical` / `Role`), liste des rôles assignés avec bouton « Retirer », sélecteur de rôles Entra ID avec `AutoCompleteMode = SuggestAppend` + bouton « Ajouter rôle ».
+- **Chargement dynamique des rôles** : tous les rôles Entra ID du tenant (built-in + custom) sont découverts via `Invoke-MgGraphRequest` sur `/v1.0/roleManagement/directory/roleDefinitions`. Plus aucune map statique à maintenir.
+- **Audit PIM** : scan des schedules `roleEligibilityScheduleInstances` et `roleAssignmentScheduleInstances` pour chaque groupe configuré. Détection des rôles manquants, en surplus (drift) ou OK.
+- **Mise à jour PIM** : création automatique des groupes Entra avec `IsAssignableToRole = true` (irréversible, confirmation obligatoire), assignation des rôles avec retry `SubjectNotFound` (3 tentatives × 10s), fallback automatique `noExpiration` → durée max tenant (6 mois active / 1 an eligible).
+- **Polling de réplication** : attente de propagation Entra (5s × 12 = 60s max) + attente PIM (15s) avant assignation.
+- **Import depuis le tenant** : bouton « Importer » qui recherche les groupes nommés `PIM_*` existants dans Entra ID, charge leurs schedules et les ajoute à la configuration locale.
+- **Gestion du cycle de vie** : boutons « + Nouveau groupe » et « Supprimer » dans le panneau gauche. Bouton « Sauvegarder » (violet) persiste toutes les modifications dans le JSON client via `Save-PimConfig`. Avertissement de modifications non sauvegardées à la fermeture si `$PimDirty = $true`.
+- **Export CSV** : rapport complet avec nom du groupe, type, rôles, statut, date d'export.
+- Nouvelle tuile « PIM Manager » dans `GUI_Main.ps1` (ligne 5). Fenêtre principale agrandie (820×1060).
+- Scope `RoleManagement.ReadWrite.Directory` ajouté dans `Connect.ps1`.
+- Section `pim_role_groups` ajoutée dans `_Template.json` avec 3 exemples (Role_Fixe, Groupe, Role).
+- 60+ nouvelles clés i18n (FR + EN) dans la section `pim.*` + clés tuile dans `main_menu`.
+
+**Module Employee Type — Réutilisation de la session Graph**
+
+- Le script `AzureAD_EmployeeTypeManageGUI.ps1` détecte désormais une session Graph existante via `Get-MgContext`. Lorsqu'il est lancé depuis M365 Monster, il réutilise la session partagée sans demander de ré-authentification.
+- Flag `$script:ExternalSession` : si `$true`, le script ne déconnecte pas Graph à la fermeture (préserve la session de l'application principale).
+- Le bouton « Connecter » passe automatiquement en « ✓ Connecté » et les contrôles sont activés au lancement si la session existe.
+
+### Mis à jour
+
+- `Main.ps1` : dot-sourcing de `Core/PIMFunctions.ps1` et `Modules/GUI_PIMManager.ps1`.
+- `GUI_Main.ps1` : tuile PIM ajoutée en ligne 5, fenêtre agrandie, footer repositionné.
+- `Connect.ps1` : scope `RoleManagement.ReadWrite.Directory` ajouté au tableau `$scopes`.
+- `_Template.json` : section `pim_role_groups` avec exemples.
+- `en.json` / `fr.json` : section `pim.*` complète + clés tuile PIM dans `main_menu`.
+- `REFERENCE.md` : version 3.0, arborescence mise à jour (PIMFunctions, GUI_PIMManager), permissions PIM, notes techniques (roleEligibilityScheduleRequests, IsAssignableToRole, polling), historique des versions.
+- `INSTALLATION.md` : permission `RoleManagement.ReadWrite.Directory` ajoutée, structure installée mise à jour (Core/PIMFunctions.ps1, Modules/GUI_PIMManager.ps1), tuile PIM dans la liste des 10 tuiles.
+- `CONFIGURATION.md` : permission PIM dans le tableau, section `pim_role_groups` documentée dans la référence JSON.
+
+---
+
 ## [0.1.7] — 2026-02-28
 
 ### Ajouté
 
 **Nouveau module — Profils d'accès (`GUI_AccessProfiles.ps1`)**
 
-Système complet de gestion de profils d'accès composables : chaque profil regroupe un ensemble de groupes Entra ID qui forment un package cohérent (ex : « Finance » = 3 groupes). Les profils sont stockés dans le JSON client et s'appliquent lors de l'onboarding, de la modification et via la réconciliation.
-
-- **Gestionnaire de profils** (Paramètres → Gestion des profils d'accès) : interface CRUD pour créer, éditer et supprimer des profils. Recherche de groupes Entra ID en temps réel via Graph API, profil baseline (appliqué automatiquement à tous les employés), sauvegarde persistante dans le JSON client.
-- **Intégration Onboarding** : section « Profils d'accès » dans le formulaire de création. Le profil baseline est affiché en lecture seule (toujours appliqué). Les profils additionnels sont sélectionnables via CheckedListBox. Bouton « Prévisualiser les groupes » affiche la liste complète des groupes résultants avec leur profil source. Les groupes sont ajoutés à l'utilisateur lors de la création.
-- **Intégration Modification** : changement de profils dans le module Modification via `Show-ChangeAccessProfile`. Affichage des profils actuels (détectés) et sélection des nouveaux profils. Diff intelligent : les groupes à l'intersection ne sont pas touchés, seuls les ajouts/retraits chirurgicaux sont exécutés.
-- **Réconciliation** (bouton « Réconcilier » dans le gestionnaire de profils) : scan des utilisateurs associés à un profil et détection des groupes manquants. Algorithme batch O(N) — N appels Graph (un par groupe du profil), pas de requête par utilisateur. Seuil configurable pour minimiser les faux positifs. DataGridView avec lignes rouges (écarts) / vertes (corrigés). Application en lot avec barre de progression. Export CSV avec piste d'audit complète (UPN, groupes manquants, profil source).
-
-**Fonctions backend — `Core/Functions.ps1`**
-
-- `Get-AccessProfiles` : retourne la liste des profils du client courant avec filtrage baseline optionnel.
-- `Get-BaselineProfile` : retourne le profil marqué `is_baseline = true`.
-- `Compare-AccessProfileGroups` : calcule le diff intelligent entre deux ensembles de profils (ToAdd, ToRemove, ToKeep). Inclut automatiquement le baseline. Gère correctement le cas onboarding (OldProfileKeys vide).
-- `Get-UserActiveProfiles` : détecte les profils actifs d'un utilisateur par correspondance complète de ses appartenances de groupes.
-- `Invoke-AccessProfileChange` : applique un changement de profils (ajouts + retraits chirurgicaux). Gère les cas « already member » et « not found » silencieusement.
-- `Get-ProfileReconciliation` : scan batch des écarts entre un template de profil et les utilisateurs en production.
-- `Invoke-ProfileReconciliation` : applique les corrections avec progression et gestion d'erreur granulaire.
-
-**Fonctions Graph API — `Core/GraphAPI.ps1`**
-
-- `Search-AzGroups` : recherche de groupes Entra ID par nom (préfixe) pour l'éditeur de profils.
-
-**Configuration client — `_Template.json`**
-
-- Nouvelle section optionnelle `access_profiles` avec 7 profils par défaut : Base commune [B], Direction, Finance, Juridique, Maintenance, Ressources humaines, Technologies de l'information.
-- Rétrocompatible : les clients sans `access_profiles` ne sont pas impactés.
-
-**Internationalisation**
-
-- 30+ nouvelles clés i18n (FR + EN) dans les sections `access_profiles` et `onboarding` : éditeur de profils, recherche de groupes, prévisualisation, réconciliation, messages de confirmation et d'erreur.
-
-### Corrigé
-
-- **Profils d'accès — bouton « Nouveau profil » tronqué** : largeur élargie de 95px à 110px pour afficher le texte FR complet.
-- **Profils d'accès — bouton recherche affichant un carré** : l'emoji 🔍 (non supporté par WinForms) remplacé par un bouton texte « Rechercher » via `Get-Text`.
-- **Profils d'accès — bouton « Réconcilier » masqué** : zone de résultats de recherche réduite (120→100px), repositionnement du hint et des boutons d'action pour éviter les chevauchements.
-- **Profils d'accès — faux avertissement « non sauvegardé »** : le flag `$script:APDirty` n'était jamais remis à `$false` après sauvegarde. Ajout du reset après persist réussi.
-- **Profils d'accès — message de fermeture hardcodé** : chaîne FR remplacée par `Get-Text "access_profiles.unsaved_warning"`.
-- **Onboarding — baseline non appliqué** : le diff `Compare-AccessProfileGroups` plaçait le baseline dans `$oldGroups` même pour un onboarding (`OldProfileKeys = @()`), causant son classement en `$toKeep` au lieu de `$toAdd`. Corrigé par condition `$OldProfileKeys.Count -gt 0`.
-- **Onboarding — profils additionnels non appliqués** : la garde `Get-Variable -Scope Local` créait un `$clbProfiles = $null` local qui masquait la variable du scope parent. Bloc supprimé.
+- Système de profils d'accès composables : chaque profil regroupe un ensemble de groupes Entra ID formant un package cohérent (ex : « Finance » = 3 groupes). Les profils sont stockés dans le JSON client (`access_profiles`) et s'appliquent lors de l'onboarding, de la modification et via la réconciliation.
+- **Gestionnaire de profils** dans GUI_Settings : créer, éditer, supprimer des profils. Recherche de groupes Entra via `Search-AzGroups`. Profil baseline applicable automatiquement à tous les nouveaux employés.
+- **Intégration Onboarding** : le profil baseline s'applique automatiquement. Profils additionnels sélectionnables via CheckedListBox. Bouton « Prévisualiser » pour vérifier les groupes avant création.
+- **Intégration Modification** : changer les profils d'un employé existant avec diff intelligent (seuls les ajouts/retraits nécessaires sont exécutés via Graph).
+- **Réconciliation bidirectionnelle** : détection et correction des écarts entre les profils templates et les groupes réels des utilisateurs. Gestion des `_pending_removals` dans le JSON pour traquer les groupes retirés d'un profil.
+- Section `access_profiles` ajoutée dans `_Template.json` avec profils exemples (Common baseline, Finance, Legal, RH, Direction, TI, Maintenance).
+- 40+ clés i18n (FR + EN) pour la gestion des profils d'accès.
 
 ### Mis à jour
 
-- `Core/Functions.ps1` : +7 fonctions profils d'accès (Get-AccessProfiles, Get-BaselineProfile, Compare-AccessProfileGroups, Invoke-AccessProfileChange, Get-UserActiveProfiles, Get-ProfileReconciliation, Invoke-ProfileReconciliation).
-- `Core/GraphAPI.ps1` : +1 fonction (Search-AzGroups).
-- `Modules/GUI_AccessProfiles.ps1` : nouveau module ~820 lignes (éditeur + réconciliation).
-- `Modules/GUI_Onboarding.ps1` : 3 insertions (section GUI profils, récapitulatif confirmation, appel Invoke-AccessProfileChange).
-- `Modules/GUI_Modification.ps1` : intégration Show-ChangeAccessProfile.
-- `Modules/GUI_Settings.ps1` : bouton d'accès au gestionnaire de profils.
+- `Core/Functions.ps1` : `Get-ProfileReconciliation` avec paramètre `-RemovedGroups` pour la réconciliation bidirectionnelle.
+- `Core/GraphAPI.ps1` : `Search-AzGroups` pour la recherche de groupes Entra.
 - `Main.ps1` : dot-sourcing de `GUI_AccessProfiles.ps1`.
-- `Clients/_Template.json` : section `access_profiles` avec 7 profils par défaut.
-- `Lang/fr.json`, `Lang/en.json` : 30+ nouvelles clés i18n.
-- `REFERENCE.md` : v2.5, section profils d'accès, architecture, historique.
-- `INSTALLATION.md` : module GUI_AccessProfiles dans la structure, section profils dans l'utilisation.
-- `CONFIGURATION.md` : v2.1, référence complète de la section `access_profiles`.
+- `GUI_Main.ps1` : tuile « Profils d'accès » ajoutée.
+- Documentation complète mise à jour (REFERENCE, INSTALLATION, CONFIGURATION).
+
+---
+
+## [0.1.6] — 2026-02-25
+
+### Corrigé
+
+**Audit Shared Mailbox — Performance et throttling Graph API**
+
+- **Chargement initial très lent (~6 min pour 63 BAL)** : l'enrichissement Graph via `$batch` avec `signInActivity` déclenchait un throttling massif (429 Too Many Requests). Chaque batch de 20 sous-requêtes prenait ~80 secondes à cause du coût interne de `signInActivity` côté Microsoft.
+- **Erreurs 429 fréquentes au rechargement** : les appels Graph saturaient le quota API du tenant, provoquant des rejets en cascade.
+
+### Ajouté
+
+**Architecture 2 passes `$filter` (remplacement du `$batch`)**
+
+- **Passe 1** (v1.0) : `$filter=id eq '...'` par lots de 15 pour `accountEnabled`, `assignedLicenses`, `mail`, etc. Temps : ~2s.
+- **Passe 2** (beta) : `$filter=id eq '...'` par lots de 15 pour `signInActivity`. Temps : ~6s.
+- L'approche `$filter` (requête de liste) ne compte qu'une seule requête HTTP par lot côté rate limiter Graph, vs 20 sous-requêtes comptabilisées individuellement avec `$batch`. Résultat : **6 minutes → 10 secondes**.
+- Pré-chargement du cache SKU licences avant le traitement.
+- Retry avec backoff progressif (3 tentatives) sur les 429 résiduels.
+- Throttle inter-lots (300ms) pour lisser la charge.
+
+### Mis à jour
+
+- `Modules/GUI_SharedMailboxAudit.ps1` : réécriture complète de la stratégie d'enrichissement.
 
 ---
 
