@@ -6,6 +6,68 @@ Versioning selon [Semantic Versioning](https://semver.org/lang/fr/).
 
 ---
 
+## [0.1.9] — 2026-03-24
+
+### Refonte — Module Onboarding (`GUI_Onboarding.ps1`)
+
+**Gestionnaire obligatoire**
+
+- Le champ Gestionnaire (Manager) est désormais obligatoire (marqué `*`, validation bloquante).
+- La validation empêche la soumission si aucun gestionnaire n'est sélectionné via la recherche dynamique.
+- Le gestionnaire est systématiquement inclus dans le récapitulatif de confirmation et la notification email.
+
+**Licences — Recherche dynamique par préfixe**
+
+- Suppression des groupes de licence hardcodés (`license_groups` dans le JSON client).
+- Nouveau champ `license_group_prefix` dans les paramètres client (ex: `LIC_`, `LIC-`, `License_`).
+- Les groupes de licence sont chargés dynamiquement via `Search-AzGroups` avec filtrage strict `startsWith` (le `$search` Graph fait un "contains", le filtrage côté client ne garde que les noms commençant par le préfixe).
+- Passage d'un ComboBox single-select à un **CheckedListBox multi-sélection** : il est désormais possible d'assigner plusieurs groupes de licence lors de l'onboarding.
+- Bouton ⟳ pour rafraîchir la liste des licences. Label d'info indiquant le préfixe actif.
+
+**Groupes d'appartenance — Recherche dynamique**
+
+- Suppression des groupes d'appartenance hardcodés (`membership_groups` dans le JSON client).
+- Nouveau pattern de recherche dynamique : champ de recherche + `Search-AzGroups` → résultats dans une ListBox, double-clic pour ajouter au CheckedListBox des groupes sélectionnés.
+- **Layout côte à côte** : résultats de recherche à gauche (380px), groupes sélectionnés à droite (380px), compteur de sélection en temps réel.
+- Section déplacée **après les Profils d'accès** pour un flux logique (identité → poste → licence → profils → groupes → mot de passe).
+
+**Fenêtre redimensionnable**
+
+- Le formulaire d'onboarding est désormais redimensionnable (`Sizable`) avec une taille par défaut de 1060×920 et un minimum de 900×700.
+- Le panel scrollable et les boutons Créer/Annuler sont ancrés pour suivre le redimensionnement.
+
+**Optimisation du code**
+
+- Chargement des données dynamiques AzAD factorisé en boucle `foreach` (4 appels → 1 bloc).
+- Nouvelle fonction `Add-SectionHeader` éliminant la duplication pour les labels de section.
+- Validation des champs obligatoires factorisée via un tableau `$validations`.
+
+### Modifié — Module Paramétrage (`GUI_Settings.ps1`)
+
+- Sections `GROUPES DE LICENCE` et `GROUPES D'APPARTENANCE` supprimées (plus de listes hardcodées).
+- Nouvelle section `LICENCE (RECHERCHE DYNAMIQUE)` avec un champ `Préfixe licence`.
+- Rétrocompatibilité dans `Set-FormFromConfig` : détection automatique de l'ancien format `license_groups` et migration vers `license_group_prefix`.
+- Bouton « Gestionnaire de profils d'accès » désormais **grisé** (couleur `DarkGray` + `Enabled = $false`) tant qu'aucun client n'est chargé en édition. Repasse en bleu à la sélection d'un client. Tooltip explicatif au survol.
+- Préservation des `pim_role_groups` en plus des `access_profiles` lors de la sauvegarde.
+
+### Ajouté — Migration automatique des JSON clients (`Config.ps1`)
+
+- Nouvelle fonction `Invoke-ConfigMigration` appelée au chargement de chaque fichier client.
+- Détecte `license_groups` → extrait intelligemment le préfixe commun (ex: `["LIC-M365-E3", "LIC-M365-E5"]` → `"LIC-"`), ajoute `license_group_prefix`, supprime `license_groups`.
+- Détecte `membership_groups` → le supprime (recherche dynamique prend le relais).
+- **Sauvegarde automatique** du fichier JSON migré sur disque. La migration ne se déclenche qu'une fois par fichier.
+- `license_groups` et `membership_groups` retirés des champs obligatoires dans la validation.
+
+### Mis à jour — Fichiers de langue (`fr.json`, `en.json`)
+
+- 11 nouvelles clés i18n dans la section `onboarding` : `validation_manager`, `license_prefix_info`, `license_no_prefix`, `group_search_label`, `group_search_help`, `group_min_chars`, `group_search_title`, `group_no_result`, `group_selected_label`, `group_selected_count`.
+
+### Mis à jour — Template JSON (`_Template.json`)
+
+- `license_groups` et `membership_groups` remplacés par `"license_group_prefix": "LIC_"`.
+
+---
+
 ## [0.1.8] — 2026-03-24
 
 ### Ajouté

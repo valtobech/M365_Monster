@@ -117,7 +117,17 @@
     "profile_preview_title": "Prévisualisation des groupes",
     "profile_preview_total": "Total : {0} groupe(s) à ajouter",
     "profile_preview_source": "(profil : {0})",
-    "confirm_profiles": "Profils d'accès"
+    "confirm_profiles": "Profils d'accès",
+    "validation_manager": "Le Gestionnaire est obligatoire. Veuillez rechercher et sélectionner un gestionnaire.",
+    "license_prefix_info": "Groupes chargés automatiquement (préfixe : {0})",
+    "license_no_prefix": "Aucun préfixe de licence configuré — configurez-le dans Paramétrage.",
+    "group_search_label": "Rechercher un groupe",
+    "group_search_help": "Tapez au moins 2 caractères puis cliquez Chercher. Double-cliquez un résultat pour l'ajouter.",
+    "group_min_chars": "Saisissez au moins 2 caractères pour rechercher.",
+    "group_search_title": "Recherche de groupes",
+    "group_no_result": "Aucun groupe trouvé.",
+    "group_selected_label": "Groupes ajoutés",
+    "group_selected_count": "{0} groupe(s) sélectionné(s)"
   },
   "password_dialog": {
     "title": "Identifiants générés",

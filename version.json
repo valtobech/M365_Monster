@@ -1,6 +1,6 @@
 {
-  "version": "0.1.8",
+  "version": "0.1.9",
   "release_date": "2026-03-24",
   "minimum_ps_version": "7.0",
-  "release_notes": "Nouveau module PIM Manager (audit, création, assignation de rôles Entra ID) + Employee Type : réutilisation session Graph"
+  "release_notes": "Refonte onboarding : gestionnaire obligatoire, licences dynamiques par préfixe, groupes d'appartenance dynamiques, fenêtre redimensionnable. Migration auto des anciens JSON clients."
 }

@@ -6,14 +6,15 @@
     Formulaire d'arrivée (onboarding) d'un nouvel employé.
     Champs dynamiques alimentés depuis Azure AD (department, jobTitle, etc.).
     Génération automatique du username avec 3 formats au choix et vérification d'unicité.
-    Licences et groupes d'appartenance référencés depuis le JSON client.
+    Licences via recherche dynamique par préfixe (configurable dans Settings).
+    Groupes d'appartenance via recherche dynamique dans Entra ID.
 
 .DEPENDANCES
     - Core/Functions.ps1 (New-UsernameVariants, New-SecurePassword, Write-Log,
       Show-ConfirmDialog, Show-ResultDialog, Show-PasswordDialog, Get-MailNickname,
       Remove-Diacritics)
     - Core/GraphAPI.ps1 (New-AzUser, Add-AzUserToGroup, Set-AzUserManager,
-      Search-AzUsers, Get-AzDistinctValues, Test-AzUserExists)
+      Search-AzUsers, Search-AzGroups, Get-AzDistinctValues, Test-AzUserExists)
     - Variable globale $Config
 
 .AUTEUR
@@ -32,40 +33,34 @@ function Show-OnboardingForm {
     # =================================================================
     # Chargement des données dynamiques depuis Azure AD
     # =================================================================
-    $script:DynDepartments   = @()
-    $script:DynJobTitles     = @()
-    $script:DynEmployeeTypes = @()
-    $script:DynUsageLocations = @()
-
-    $resDept = Get-AzDistinctValues -Property "department"
-    if ($resDept.Success) { $script:DynDepartments = $resDept.Data }
-
-    $resJob = Get-AzDistinctValues -Property "jobTitle"
-    if ($resJob.Success) { $script:DynJobTitles = $resJob.Data }
-
-    $resEmpType = Get-AzDistinctValues -Property "employeeType"
-    if ($resEmpType.Success) { $script:DynEmployeeTypes = $resEmpType.Data }
-
-    $resLoc = Get-AzDistinctValues -Property "usageLocation"
-    if ($resLoc.Success) { $script:DynUsageLocations = $resLoc.Data }
+    $dynData = @{}
+    foreach ($prop in @("department", "jobTitle", "employeeType", "usageLocation")) {
+        $res = Get-AzDistinctValues -Property $prop
+        $dynData[$prop] = if ($res.Success) { $res.Data } else { @() }
+    }
 
     # =================================================================
-    # Construction du formulaire
+    # Construction du formulaire — redimensionnable
     # =================================================================
     $form = New-Object System.Windows.Forms.Form
     $form.Text = Get-Text "onboarding.title" $Config.client_name
-    $form.Size = New-Object System.Drawing.Size(680, 780)
+    $form.Size = New-Object System.Drawing.Size(1060, 920)
+    $form.MinimumSize = New-Object System.Drawing.Size(900, 700)
     $form.StartPosition = "CenterScreen"
-    $form.FormBorderStyle = "FixedDialog"
-    $form.MaximizeBox = $false
-    $form.MinimizeBox = $false
+    $form.FormBorderStyle = "Sizable"
+    $form.MaximizeBox = $true
+    $form.MinimizeBox = $true
     $form.BackColor = [System.Drawing.Color]::WhiteSmoke
     $form.Font = New-Object System.Drawing.Font("Segoe UI", 9)
 
-    # Panel scrollable pour le contenu
+    # Panel scrollable pour le contenu — ancré sur les 4 côtés
     $panelMain = New-Object System.Windows.Forms.Panel
     $panelMain.Location = New-Object System.Drawing.Point(0, 0)
-    $panelMain.Size = New-Object System.Drawing.Size(665, 690)
+    $panelMain.Size = New-Object System.Drawing.Size(1040, 830)
+    $panelMain.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
+        [System.Windows.Forms.AnchorStyles]::Bottom -bor
+        [System.Windows.Forms.AnchorStyles]::Left -bor
+        [System.Windows.Forms.AnchorStyles]::Right
     $panelMain.AutoScroll = $true
     $form.Controls.Add($panelMain)
 
@@ -77,30 +72,24 @@ function Show-OnboardingForm {
     $lineH = 32
 
     # -----------------------------------------------------------------
-    # Fonction utilitaire : créer un ComboBox éditable (dropdown + saisie libre)
+    # Fonctions utilitaires : création de contrôles GUI réutilisables
     # -----------------------------------------------------------------
     function New-EditableCombo {
         param([string[]]$Items, [int]$Y)
         $cbo = New-Object System.Windows.Forms.ComboBox
         $cbo.Location = New-Object System.Drawing.Point($fldX, $Y)
         $cbo.Size = New-Object System.Drawing.Size($fldW, 25)
-        $cbo.DropDownStyle = "DropDown"  # Editable — permet la saisie libre
+        $cbo.DropDownStyle = "DropDown"
         $cbo.AutoCompleteMode = "SuggestAppend"
         $cbo.AutoCompleteSource = "ListItems"
-        foreach ($item in $Items) {
-            $cbo.Items.Add($item) | Out-Null
-        }
+        foreach ($item in $Items) { $cbo.Items.Add($item) | Out-Null }
         return $cbo
     }
 
-    # -----------------------------------------------------------------
-    # Fonction utilitaire : ajouter un label
-    # -----------------------------------------------------------------
     function Add-Label {
         param([string]$Text, [int]$Y, [bool]$Required = $false)
         $lbl = New-Object System.Windows.Forms.Label
-        $displayText = if ($Required) { "$Text *" } else { $Text }
-        $lbl.Text = $displayText
+        $lbl.Text = if ($Required) { "$Text *" } else { $Text }
         $lbl.Location = New-Object System.Drawing.Point($lblX, ($Y + 4))
         $lbl.Size = New-Object System.Drawing.Size($lblW, 20)
         if ($Required) {
@@ -109,17 +98,22 @@ function Show-OnboardingForm {
         $panelMain.Controls.Add($lbl)
     }
 
+    function Add-SectionHeader {
+        param([string]$TextKey, [ref]$YRef)
+        $lbl = New-Object System.Windows.Forms.Label
+        $lbl.Text = Get-Text $TextKey
+        $lbl.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+        $lbl.ForeColor = [System.Drawing.Color]::FromArgb(0, 123, 255)
+        $lbl.Location = New-Object System.Drawing.Point($lblX, $YRef.Value)
+        $lbl.Size = New-Object System.Drawing.Size(620, 22)
+        $panelMain.Controls.Add($lbl)
+        $YRef.Value += 28
+    }
+
     # =================================================================
     # SECTION : Identité
     # =================================================================
-    $lblSectionId = New-Object System.Windows.Forms.Label
-    $lblSectionId.Text = Get-Text "onboarding.section_identity"
-    $lblSectionId.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-    $lblSectionId.ForeColor = [System.Drawing.Color]::FromArgb(0, 123, 255)
-    $lblSectionId.Location = New-Object System.Drawing.Point($lblX, $yPos)
-    $lblSectionId.Size = New-Object System.Drawing.Size(620, 22)
-    $panelMain.Controls.Add($lblSectionId)
-    $yPos += 28
+    Add-SectionHeader -TextKey "onboarding.section_identity" -YRef ([ref]$yPos)
 
     # --- Nom ---
     Add-Label -Text (Get-Text "onboarding.field_lastname") -Y $yPos -Required $true
@@ -137,7 +131,7 @@ function Show-OnboardingForm {
     $panelMain.Controls.Add($txtPrenom)
     $yPos += $lineH
 
-    # --- Courriel / Logon Name (ComboBox alimenté dynamiquement) ---
+    # --- Courriel / Logon Name ---
     Add-Label -Text (Get-Text "onboarding.field_email") -Y $yPos -Required $true
     $cboUsername = New-Object System.Windows.Forms.ComboBox
     $cboUsername.Location = New-Object System.Drawing.Point($fldX, $yPos)
@@ -164,7 +158,6 @@ function Show-OnboardingForm {
     $panelMain.Controls.Add($lblUpnInfo)
     $yPos += 42
 
-    # Variable pour stocker les variantes générées
     $script:UsernameVariants = @()
 
     # Action du bouton Générer
@@ -174,8 +167,8 @@ function Show-OnboardingForm {
 
         if ([string]::IsNullOrWhiteSpace($nom) -or [string]::IsNullOrWhiteSpace($prenom)) {
             [System.Windows.Forms.MessageBox]::Show(
-                    (Get-Text "onboarding.upn_required"),
-                    (Get-Text "onboarding.upn_required_title"),
+                (Get-Text "onboarding.upn_required"),
+                (Get-Text "onboarding.upn_required_title"),
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Warning
             ) | Out-Null
@@ -206,30 +199,23 @@ function Show-OnboardingForm {
     # =================================================================
     # SECTION : Poste
     # =================================================================
-    $lblSectionPoste = New-Object System.Windows.Forms.Label
-    $lblSectionPoste.Text = Get-Text "onboarding.section_position"
-    $lblSectionPoste.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-    $lblSectionPoste.ForeColor = [System.Drawing.Color]::FromArgb(0, 123, 255)
-    $lblSectionPoste.Location = New-Object System.Drawing.Point($lblX, $yPos)
-    $lblSectionPoste.Size = New-Object System.Drawing.Size(620, 22)
-    $panelMain.Controls.Add($lblSectionPoste)
-    $yPos += 28
+    Add-SectionHeader -TextKey "onboarding.section_position" -YRef ([ref]$yPos)
 
-    # --- Titre du poste (Job Title) — dynamique + saisie libre ---
+    # --- Titre du poste ---
     Add-Label -Text (Get-Text "onboarding.field_job_title") -Y $yPos -Required $true
-    $cboJobTitle = New-EditableCombo -Items $script:DynJobTitles -Y $yPos
+    $cboJobTitle = New-EditableCombo -Items $dynData["jobTitle"] -Y $yPos
     $panelMain.Controls.Add($cboJobTitle)
     $yPos += $lineH
 
-    # --- Département — dynamique + saisie libre ---
+    # --- Département ---
     Add-Label -Text (Get-Text "onboarding.field_department") -Y $yPos -Required $true
-    $cboDepartment = New-EditableCombo -Items $script:DynDepartments -Y $yPos
+    $cboDepartment = New-EditableCombo -Items $dynData["department"] -Y $yPos
     $panelMain.Controls.Add($cboDepartment)
     $yPos += $lineH
 
-    # --- Employee Type — dynamique + saisie libre ---
+    # --- Employee Type ---
     Add-Label -Text (Get-Text "onboarding.field_employee_type") -Y $yPos -Required $true
-    $cboEmployeeType = New-EditableCombo -Items $script:DynEmployeeTypes -Y $yPos
+    $cboEmployeeType = New-EditableCombo -Items $dynData["employeeType"] -Y $yPos
     $panelMain.Controls.Add($cboEmployeeType)
     $yPos += $lineH
 
@@ -241,8 +227,8 @@ function Show-OnboardingForm {
     $panelMain.Controls.Add($txtEmployeeId)
     $yPos += $lineH
 
-    # --- Gestionnaire (Manager) — recherche dynamique ---
-    Add-Label -Text (Get-Text "onboarding.field_manager") -Y $yPos -Required $false
+    # --- Gestionnaire (Manager) — recherche dynamique — OBLIGATOIRE ---
+    Add-Label -Text (Get-Text "onboarding.field_manager") -Y $yPos -Required $true
     $txtManagerSearch = New-Object System.Windows.Forms.TextBox
     $txtManagerSearch.Location = New-Object System.Drawing.Point($fldX, $yPos)
     $txtManagerSearch.Size = New-Object System.Drawing.Size(340, 25)
@@ -277,7 +263,12 @@ function Show-OnboardingForm {
     $btnManagerSearch.Add_Click({
         $terme = $txtManagerSearch.Text.Trim()
         if ($terme.Length -lt 2) {
-            [System.Windows.Forms.MessageBox]::Show(    (Get-Text "onboarding.manager_min_chars"), (Get-Text "onboarding.manager_search_title"), [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+            [System.Windows.Forms.MessageBox]::Show(
+                (Get-Text "onboarding.manager_min_chars"),
+                (Get-Text "onboarding.manager_search_title"),
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
             return
         }
         $lstManager.Items.Clear()
@@ -292,7 +283,12 @@ function Show-OnboardingForm {
         }
         else {
             $lstManager.Visible = $false
-            [System.Windows.Forms.MessageBox]::Show(    (Get-Text "onboarding.manager_no_result"), (Get-Text "onboarding.manager_search_title"), [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+            [System.Windows.Forms.MessageBox]::Show(
+                (Get-Text "onboarding.manager_no_result"),
+                (Get-Text "onboarding.manager_search_title"),
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
         }
     })
 
@@ -317,10 +313,9 @@ function Show-OnboardingForm {
 
     $yPos += 22
 
-    # --- Usage Location — dynamique + saisie libre ---
+    # --- Usage Location ---
     Add-Label -Text (Get-Text "onboarding.field_usage_location") -Y $yPos -Required $true
-    $cboUsageLocation = New-EditableCombo -Items $script:DynUsageLocations -Y $yPos
-    # Pré-sélectionner CA si disponible
+    $cboUsageLocation = New-EditableCombo -Items $dynData["usageLocation"] -Y $yPos
     $idxCA = $cboUsageLocation.Items.IndexOf("CA")
     if ($idxCA -ge 0) { $cboUsageLocation.SelectedIndex = $idxCA }
     elseif ($cboUsageLocation.Items.Count -gt 0) { $cboUsageLocation.SelectedIndex = 0 }
@@ -328,74 +323,79 @@ function Show-OnboardingForm {
     $yPos += $lineH
 
     # =================================================================
-    # SECTION : Licence
+    # SECTION : Licence — startsWith préfixe + multi-sélection
     # =================================================================
-    $lblSectionLic = New-Object System.Windows.Forms.Label
-    $lblSectionLic.Text = Get-Text "onboarding.section_license"
-    $lblSectionLic.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-    $lblSectionLic.ForeColor = [System.Drawing.Color]::FromArgb(0, 123, 255)
-    $lblSectionLic.Location = New-Object System.Drawing.Point($lblX, $yPos)
-    $lblSectionLic.Size = New-Object System.Drawing.Size(620, 22)
-    $panelMain.Controls.Add($lblSectionLic)
-    $yPos += 28
+    Add-SectionHeader -TextKey "onboarding.section_license" -YRef ([ref]$yPos)
 
-    # --- License Pack — dropdown depuis le JSON ---
+    # Fonction locale : charger les groupes filtrés strictement par startsWith
+    $script:LicenseGroupNames = @()
+
+    function Update-LicenseList {
+        $clbLicenses.Items.Clear()
+        $script:LicenseGroupNames = @()
+        $prefix = if ($Config.PSObject.Properties["license_group_prefix"]) { $Config.license_group_prefix } else { "" }
+        if ([string]::IsNullOrWhiteSpace($prefix)) { return }
+
+        $res = Search-AzGroups -SearchTerm $prefix -MaxResults 50
+        if ($res.Success -and $res.Data) {
+            # Filtrage strict startsWith — Graph $search fait un "contains"
+            $filtered = $res.Data | Where-Object { $_.DisplayName -like "$prefix*" } | Sort-Object DisplayName
+            foreach ($grp in $filtered) {
+                $clbLicenses.Items.Add($grp.DisplayName, $false) | Out-Null
+                $script:LicenseGroupNames += $grp.DisplayName
+            }
+        }
+    }
+
     Add-Label -Text (Get-Text "onboarding.field_license_group") -Y $yPos -Required $false
-    $cboLicenseGroup = New-Object System.Windows.Forms.ComboBox
-    $cboLicenseGroup.Location = New-Object System.Drawing.Point($fldX, $yPos)
-    $cboLicenseGroup.Size = New-Object System.Drawing.Size($fldW, 25)
-    $cboLicenseGroup.DropDownStyle = "DropDownList"
-    $cboLicenseGroup.Items.Add((Get-Text "onboarding.license_none")) | Out-Null
-    foreach ($grp in $Config.license_groups) {
-        $cboLicenseGroup.Items.Add($grp) | Out-Null
+    $clbLicenses = New-Object System.Windows.Forms.CheckedListBox
+    $clbLicenses.Location = New-Object System.Drawing.Point($fldX, $yPos)
+    $clbLicenses.Size = New-Object System.Drawing.Size(340, 80)
+    $clbLicenses.CheckOnClick = $true
+    $panelMain.Controls.Add($clbLicenses)
+
+    # Bouton rafraîchir
+    $btnRefreshLic = New-Object System.Windows.Forms.Button
+    $btnRefreshLic.Text = "⟳"
+    $btnRefreshLic.Location = New-Object System.Drawing.Point(($fldX + 348), $yPos)
+    $btnRefreshLic.Size = New-Object System.Drawing.Size(35, 25)
+    $btnRefreshLic.FlatStyle = "Flat"
+    $btnRefreshLic.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+    $btnRefreshLic.Add_Click({ Update-LicenseList })
+    $panelMain.Controls.Add($btnRefreshLic)
+
+    # Chargement initial des licences
+    Update-LicenseList
+
+    # Info préfixe
+    $licPrefix = if ($Config.PSObject.Properties["license_group_prefix"]) { $Config.license_group_prefix } else { "" }
+    $lblLicInfo = New-Object System.Windows.Forms.Label
+    $lblLicInfo.Font = New-Object System.Drawing.Font("Segoe UI", 8, [System.Drawing.FontStyle]::Italic)
+    $lblLicInfo.ForeColor = [System.Drawing.Color]::Gray
+    $lblLicInfo.Location = New-Object System.Drawing.Point($fldX, ($yPos + 82))
+    $lblLicInfo.Size = New-Object System.Drawing.Size(430, 16)
+    if (-not [string]::IsNullOrWhiteSpace($licPrefix)) {
+        $lblLicInfo.Text = Get-Text "onboarding.license_prefix_info" $licPrefix
     }
-    $cboLicenseGroup.SelectedIndex = 0
-    $panelMain.Controls.Add($cboLicenseGroup)
-    $yPos += $lineH
+    else {
+        $lblLicInfo.Text = Get-Text "onboarding.license_no_prefix"
+    }
+    $panelMain.Controls.Add($lblLicInfo)
+    $yPos += 104
 
     # =================================================================
-    # SECTION : Groupes d'appartenance
-    # =================================================================
-    $lblSectionGrp = New-Object System.Windows.Forms.Label
-    $lblSectionGrp.Text = Get-Text "onboarding.section_groups"
-    $lblSectionGrp.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-    $lblSectionGrp.ForeColor = [System.Drawing.Color]::FromArgb(0, 123, 255)
-    $lblSectionGrp.Location = New-Object System.Drawing.Point($lblX, $yPos)
-    $lblSectionGrp.Size = New-Object System.Drawing.Size(620, 22)
-    $panelMain.Controls.Add($lblSectionGrp)
-    $yPos += 26
-
-    # CheckedListBox pour sélection multiple des groupes
-    $clbGroupes = New-Object System.Windows.Forms.CheckedListBox
-    $clbGroupes.Location = New-Object System.Drawing.Point($fldX, $yPos)
-    $clbGroupes.Size = New-Object System.Drawing.Size($fldW, 80)
-    $clbGroupes.CheckOnClick = $true
-    foreach ($grp in $Config.membership_groups) {
-        $clbGroupes.Items.Add($grp, $false) | Out-Null
-    }
-    $panelMain.Controls.Add($clbGroupes)
-    $yPos += 88
-
-# =================================================================
     # SECTION : Profils d'accès (si configurés)
     # =================================================================
-    $script:OnbProfileKeys = @()  # Clés des profils cochés (pour la soumission)
+    $script:OnbProfileKeys = @()
+    $clbProfiles = $null
 
     if ($Config.PSObject.Properties["access_profiles"]) {
         $onbProfiles = Get-AccessProfiles -ExcludeBaseline
         $onbBaseline = Get-BaselineProfile
 
         if ($onbProfiles.Count -gt 0 -or $onbBaseline) {
-            $lblSectionAP = New-Object System.Windows.Forms.Label
-            $lblSectionAP.Text = Get-Text "onboarding.section_access_profiles"
-            $lblSectionAP.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-            $lblSectionAP.ForeColor = [System.Drawing.Color]::FromArgb(0, 123, 255)
-            $lblSectionAP.Location = New-Object System.Drawing.Point($lblX, $yPos)
-            $lblSectionAP.Size = New-Object System.Drawing.Size(620, 22)
-            $panelMain.Controls.Add($lblSectionAP)
-            $yPos += 26
+            Add-SectionHeader -TextKey "onboarding.section_access_profiles" -YRef ([ref]$yPos)
 
-            # Baseline (lecture seule, toujours appliqué)
             if ($onbBaseline) {
                 Add-Label -Text (Get-Text "onboarding.profile_baseline_label") -Y $yPos -Required $false
                 $lblBaselineVal = New-Object System.Windows.Forms.Label
@@ -408,7 +408,6 @@ function Show-OnboardingForm {
                 $yPos += $lineH
             }
 
-            # Profils additionnels (CheckedListBox)
             if ($onbProfiles.Count -gt 0) {
                 Add-Label -Text (Get-Text "onboarding.profile_select_label") -Y $yPos -Required $false
                 $clbProfiles = New-Object System.Windows.Forms.CheckedListBox
@@ -422,7 +421,7 @@ function Show-OnboardingForm {
                 $yPos += $clbProfiles.Size.Height + 8
             }
 
-            # Bouton Prévisualiser (liste tous les groupes résultants)
+            # Bouton Prévisualiser
             $btnPreviewGrp = New-Object System.Windows.Forms.Button
             $btnPreviewGrp.Text = Get-Text "onboarding.profile_preview_btn"
             $btnPreviewGrp.Location = New-Object System.Drawing.Point($fldX, $yPos)
@@ -431,7 +430,6 @@ function Show-OnboardingForm {
             $btnPreviewGrp.BackColor = [System.Drawing.Color]::FromArgb(0, 123, 255)
             $btnPreviewGrp.ForeColor = [System.Drawing.Color]::White
             $btnPreviewGrp.Add_Click({
-                # Collecter les clés cochées
                 $selectedKeys = @()
                 if ($clbProfiles) {
                     for ($i = 0; $i -lt $clbProfiles.Items.Count; $i++) {
@@ -440,11 +438,9 @@ function Show-OnboardingForm {
                         }
                     }
                 }
-                # Calculer le diff (pas de profils anciens pour un onboarding)
                 $diff = Compare-AccessProfileGroups -OldProfileKeys @() -NewProfileKeys $selectedKeys -IncludeBaseline
                 $previewLines = @()
                 foreach ($g in $diff.ToAdd) {
-                    # Trouver le profil source pour info
                     $source = ""
                     if ($onbBaseline) {
                         $baseGrpIds = @($onbBaseline.Groups | ForEach-Object { $_.id })
@@ -471,16 +467,148 @@ function Show-OnboardingForm {
     }
 
     # =================================================================
+    # SECTION : Groupes d'appartenance — layout côte à côte
+    # Résultats de recherche à GAUCHE, groupes sélectionnés à DROITE
+    # =================================================================
+    Add-SectionHeader -TextKey "onboarding.section_groups" -YRef ([ref]$yPos)
+
+    # --- Colonne gauche : Recherche ---
+    $grpLeftX = $fldX
+    $grpColW = 380
+    $grpRightX = $fldX + $grpColW + 20  # Espacement de 20px entre les deux colonnes
+
+    Add-Label -Text (Get-Text "onboarding.group_search_label") -Y $yPos -Required $false
+    $txtGroupSearch = New-Object System.Windows.Forms.TextBox
+    $txtGroupSearch.Location = New-Object System.Drawing.Point($grpLeftX, $yPos)
+    $txtGroupSearch.Size = New-Object System.Drawing.Size(290, 25)
+    $panelMain.Controls.Add($txtGroupSearch)
+
+    $btnGroupSearch = New-Object System.Windows.Forms.Button
+    $btnGroupSearch.Text = Get-Text "onboarding.btn_search"
+    $btnGroupSearch.Location = New-Object System.Drawing.Point(($grpLeftX + 298), $yPos)
+    $btnGroupSearch.Size = New-Object System.Drawing.Size(80, 25)
+    $btnGroupSearch.FlatStyle = "Flat"
+    $panelMain.Controls.Add($btnGroupSearch)
+
+    # Label "Groupes ajoutés" à droite (même ligne que le champ de recherche)
+    $lblGrpSelectedTitle = New-Object System.Windows.Forms.Label
+    $lblGrpSelectedTitle.Text = Get-Text "onboarding.group_selected_label"
+    $lblGrpSelectedTitle.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+    $lblGrpSelectedTitle.Location = New-Object System.Drawing.Point($grpRightX, ($yPos + 4))
+    $lblGrpSelectedTitle.Size = New-Object System.Drawing.Size($grpColW, 20)
+    $panelMain.Controls.Add($lblGrpSelectedTitle)
+    $yPos += 28
+
+    # Info aide recherche
+    $lblGroupHelp = New-Object System.Windows.Forms.Label
+    $lblGroupHelp.Text = Get-Text "onboarding.group_search_help"
+    $lblGroupHelp.Font = New-Object System.Drawing.Font("Segoe UI", 8, [System.Drawing.FontStyle]::Italic)
+    $lblGroupHelp.ForeColor = [System.Drawing.Color]::Gray
+    $lblGroupHelp.Location = New-Object System.Drawing.Point($grpLeftX, $yPos)
+    $lblGroupHelp.Size = New-Object System.Drawing.Size($grpColW, 16)
+    $panelMain.Controls.Add($lblGroupHelp)
+    $yPos += 20
+
+    # Sauvegarder le Y de départ pour les deux colonnes
+    $grpRowY = $yPos
+
+    # --- Colonne gauche : ListBox résultats de recherche (toujours visible, vide par défaut) ---
+    $lstGroupResults = New-Object System.Windows.Forms.ListBox
+    $lstGroupResults.Location = New-Object System.Drawing.Point($grpLeftX, $grpRowY)
+    $lstGroupResults.Size = New-Object System.Drawing.Size($grpColW, 140)
+    $panelMain.Controls.Add($lstGroupResults)
+    $script:GroupSearchResults = @()
+
+    # --- Colonne droite : CheckedListBox des groupes sélectionnés ---
+    $clbGroupes = New-Object System.Windows.Forms.CheckedListBox
+    $clbGroupes.Location = New-Object System.Drawing.Point($grpRightX, $grpRowY)
+    $clbGroupes.Size = New-Object System.Drawing.Size($grpColW, 140)
+    $clbGroupes.CheckOnClick = $true
+    $panelMain.Controls.Add($clbGroupes)
+
+    # Label compteur sous la colonne droite
+    $lblGroupCount = New-Object System.Windows.Forms.Label
+    $lblGroupCount.Text = Get-Text "onboarding.group_selected_count" 0
+    $lblGroupCount.Font = New-Object System.Drawing.Font("Segoe UI", 8, [System.Drawing.FontStyle]::Italic)
+    $lblGroupCount.ForeColor = [System.Drawing.Color]::FromArgb(40, 167, 69)
+    $lblGroupCount.Location = New-Object System.Drawing.Point($grpRightX, ($grpRowY + 144))
+    $lblGroupCount.Size = New-Object System.Drawing.Size($grpColW, 16)
+    $panelMain.Controls.Add($lblGroupCount)
+
+    $yPos = $grpRowY + 166
+
+    # Action recherche de groupes
+    $btnGroupSearch.Add_Click({
+        $terme = $txtGroupSearch.Text.Trim()
+        if ($terme.Length -lt 2) {
+            [System.Windows.Forms.MessageBox]::Show(
+                (Get-Text "onboarding.group_min_chars"),
+                (Get-Text "onboarding.group_search_title"),
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
+            return
+        }
+        $lstGroupResults.Items.Clear()
+        $result = Search-AzGroups -SearchTerm $terme -MaxResults 20
+        if ($result.Success -and $result.Data) {
+            $script:GroupSearchResults = @($result.Data | Sort-Object DisplayName)
+            foreach ($grp in $script:GroupSearchResults) {
+                $lstGroupResults.Items.Add($grp.DisplayName) | Out-Null
+            }
+        }
+        else {
+            [System.Windows.Forms.MessageBox]::Show(
+                (Get-Text "onboarding.group_no_result"),
+                (Get-Text "onboarding.group_search_title"),
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
+        }
+    })
+
+    $txtGroupSearch.Add_KeyDown({
+        if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Enter) {
+            $btnGroupSearch.PerformClick()
+            $_.SuppressKeyPress = $true
+        }
+    })
+
+    # Double-clic sur un résultat → ajoute au CheckedListBox à droite (coché par défaut)
+    $lstGroupResults.Add_DoubleClick({
+        if ($lstGroupResults.SelectedIndex -ge 0) {
+            $grpName = $script:GroupSearchResults[$lstGroupResults.SelectedIndex].DisplayName
+            $existing = @()
+            for ($i = 0; $i -lt $clbGroupes.Items.Count; $i++) {
+                $existing += $clbGroupes.Items[$i].ToString()
+            }
+            if ($grpName -notin $existing) {
+                $clbGroupes.Items.Add($grpName, $true) | Out-Null
+                $checkedCount = 0
+                for ($i = 0; $i -lt $clbGroupes.Items.Count; $i++) {
+                    if ($clbGroupes.GetItemChecked($i)) { $checkedCount++ }
+                }
+                $lblGroupCount.Text = Get-Text "onboarding.group_selected_count" $checkedCount
+            }
+        }
+    })
+
+    # Mise à jour du compteur quand on coche/décoche
+    $clbGroupes.Add_ItemCheck({
+        $futureCount = 0
+        for ($i = 0; $i -lt $clbGroupes.Items.Count; $i++) {
+            if ($i -eq $_.Index) {
+                if ($_.NewValue -eq [System.Windows.Forms.CheckState]::Checked) { $futureCount++ }
+            }
+            elseif ($clbGroupes.GetItemChecked($i)) { $futureCount++ }
+        }
+        $lblGroupCount.Text = Get-Text "onboarding.group_selected_count" $futureCount
+    })
+
+    # =================================================================
     # SECTION : Mot de passe (info)
     # =================================================================
-    $lblSectionPwd = New-Object System.Windows.Forms.Label
-    $lblSectionPwd.Text = Get-Text "onboarding.section_password"
-    $lblSectionPwd.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-    $lblSectionPwd.ForeColor = [System.Drawing.Color]::FromArgb(0, 123, 255)
-    $lblSectionPwd.Location = New-Object System.Drawing.Point($lblX, $yPos)
-    $lblSectionPwd.Size = New-Object System.Drawing.Size(620, 22)
-    $panelMain.Controls.Add($lblSectionPwd)
-    $yPos += 26
+    Add-SectionHeader -TextKey "onboarding.section_password" -YRef ([ref]$yPos)
 
     $lblPwdInfo = New-Object System.Windows.Forms.Label
     $lblPwdInfo.Text = Get-Text "onboarding.password_info" $Config.password_policy.length
@@ -512,25 +640,27 @@ function Show-OnboardingForm {
     $panelMain.Controls.Add($lblChargement)
 
     # =================================================================
-    # Boutons Créer / Annuler
+    # Boutons Créer / Annuler — ancrés en bas à droite
     # =================================================================
     $btnCreer = New-Object System.Windows.Forms.Button
     $btnCreer.Text = Get-Text "onboarding.btn_create"
     $btnCreer.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-    $btnCreer.Location = New-Object System.Drawing.Point(310, 700)
     $btnCreer.Size = New-Object System.Drawing.Size(170, 38)
     $btnCreer.BackColor = [System.Drawing.Color]::FromArgb(40, 167, 69)
     $btnCreer.ForeColor = [System.Drawing.Color]::White
     $btnCreer.FlatStyle = "Flat"
+    $btnCreer.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
+    $btnCreer.Location = New-Object System.Drawing.Point(($form.ClientSize.Width - 340), ($form.ClientSize.Height - 48))
     $form.Controls.Add($btnCreer)
 
     $btnAnnuler = New-Object System.Windows.Forms.Button
     $btnAnnuler.Text = Get-Text "onboarding.btn_cancel"
     $btnAnnuler.Font = New-Object System.Drawing.Font("Segoe UI", 10)
-    $btnAnnuler.Location = New-Object System.Drawing.Point(490, 700)
     $btnAnnuler.Size = New-Object System.Drawing.Size(140, 38)
     $btnAnnuler.FlatStyle = "Flat"
     $btnAnnuler.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $btnAnnuler.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
+    $btnAnnuler.Location = New-Object System.Drawing.Point(($form.ClientSize.Width - 160), ($form.ClientSize.Height - 48))
     $form.Controls.Add($btnAnnuler)
     $form.CancelButton = $btnAnnuler
 
@@ -540,7 +670,6 @@ function Show-OnboardingForm {
     $btnCreer.Add_Click({
         $lblErreur.Visible = $false
 
-
         # --- Validation des champs obligatoires ---
         $nom       = $txtNom.Text.Trim()
         $prenom    = $txtPrenom.Text.Trim()
@@ -549,32 +678,30 @@ function Show-OnboardingForm {
         $empType   = $cboEmployeeType.Text.Trim()
         $usageLoc  = $cboUsageLocation.Text.Trim()
 
-        if ([string]::IsNullOrWhiteSpace($nom)) {
-            $lblErreur.Text = Get-Text "onboarding.validation_lastname"
-            $lblErreur.Visible = $true; return
+        $validations = @(
+            @{ Value = $nom;      Key = "onboarding.validation_lastname" },
+            @{ Value = $prenom;   Key = "onboarding.validation_firstname" },
+            @{ Value = $jobTitle; Key = "onboarding.validation_job_title" },
+            @{ Value = $dept;     Key = "onboarding.validation_department" },
+            @{ Value = $empType;  Key = "onboarding.validation_employee_type" },
+            @{ Value = $usageLoc; Key = "onboarding.validation_usage_location" }
+        )
+        foreach ($v in $validations) {
+            if ([string]::IsNullOrWhiteSpace($v.Value)) {
+                $lblErreur.Text = Get-Text $v.Key
+                $lblErreur.Visible = $true; return
+            }
         }
-        if ([string]::IsNullOrWhiteSpace($prenom)) {
-            $lblErreur.Text = Get-Text "onboarding.validation_firstname"
-            $lblErreur.Visible = $true; return
-        }
+
+        # Validation UPN
         if ($cboUsername.SelectedIndex -lt 0 -or $script:UsernameVariants.Count -eq 0) {
             $lblErreur.Text = Get-Text "onboarding.validation_email"
             $lblErreur.Visible = $true; return
         }
-        if ([string]::IsNullOrWhiteSpace($jobTitle)) {
-            $lblErreur.Text = Get-Text "onboarding.validation_job_title"
-            $lblErreur.Visible = $true; return
-        }
-        if ([string]::IsNullOrWhiteSpace($dept)) {
-            $lblErreur.Text = Get-Text "onboarding.validation_department"
-            $lblErreur.Visible = $true; return
-        }
-        if ([string]::IsNullOrWhiteSpace($empType)) {
-            $lblErreur.Text = Get-Text "onboarding.validation_employee_type"
-            $lblErreur.Visible = $true; return
-        }
-        if ([string]::IsNullOrWhiteSpace($usageLoc)) {
-            $lblErreur.Text = Get-Text "onboarding.validation_usage_location"
+
+        # Validation gestionnaire (obligatoire)
+        if (-not $script:SelectedManagerId) {
+            $lblErreur.Text = Get-Text "onboarding.validation_manager"
             $lblErreur.Visible = $true; return
         }
 
@@ -594,16 +721,20 @@ function Show-OnboardingForm {
         if (-not [string]::IsNullOrWhiteSpace($txtEmployeeId.Text)) {
             $confirmMsg += "$(Get-Text 'onboarding.confirm_employee_id')       : $($txtEmployeeId.Text.Trim())`n"
         }
-        if ($script:SelectedManagerName) {
-            $confirmMsg += "$(Get-Text 'onboarding.confirm_manager')    : $($script:SelectedManagerName)`n"
+        $confirmMsg += "$(Get-Text 'onboarding.confirm_manager')    : $($script:SelectedManagerName)`n"
+
+        # Licences sélectionnées (multi-sélection)
+        $licGroupes = @()
+        for ($i = 0; $i -lt $clbLicenses.Items.Count; $i++) {
+            if ($clbLicenses.GetItemChecked($i)) {
+                $licGroupes += $clbLicenses.Items[$i].ToString()
+            }
         }
-        # Licence
-        $licGroup = $null
-        if ($cboLicenseGroup.SelectedIndex -gt 0) {
-            $licGroup = $cboLicenseGroup.SelectedItem.ToString()
-            $confirmMsg += "$(Get-Text 'onboarding.confirm_license'): $licGroup`n"
+        if ($licGroupes.Count -gt 0) {
+            $confirmMsg += "$(Get-Text 'onboarding.confirm_license'): $($licGroupes -join ', ')`n"
         }
-        # Groupes
+
+        # Groupes d'appartenance sélectionnés
         $groupesSelectionnes = @()
         for ($i = 0; $i -lt $clbGroupes.Items.Count; $i++) {
             if ($clbGroupes.GetItemChecked($i)) {
@@ -672,16 +803,14 @@ function Show-OnboardingForm {
             $newUserId = $createResult.Data.Id
             $erreurs = @()
 
-            # 4. Attribution du manager
-            if ($script:SelectedManagerId) {
-                $mgrResult = Set-AzUserManager -UserId $newUserId -ManagerId $script:SelectedManagerId
-                if (-not $mgrResult.Success) { $erreurs += "Manager : $($mgrResult.Error)" }
-            }
+            # 4. Attribution du manager (toujours — champ obligatoire)
+            $mgrResult = Set-AzUserManager -UserId $newUserId -ManagerId $script:SelectedManagerId
+            if (-not $mgrResult.Success) { $erreurs += "Manager : $($mgrResult.Error)" }
 
-            # 5. Ajout au groupe de licence
-            if ($licGroup) {
-                $licResult = Add-AzUserToGroup -UserId $newUserId -GroupName $licGroup
-                if (-not $licResult.Success) { $erreurs += "Licence ($licGroup) : $($licResult.Error)" }
+            # 5. Ajout aux groupes de licence (multi-sélection)
+            foreach ($licGrp in $licGroupes) {
+                $licResult = Add-AzUserToGroup -UserId $newUserId -GroupName $licGrp
+                if (-not $licResult.Success) { $erreurs += "Licence ($licGrp) : $($licResult.Error)" }
             }
 
             # 6. Ajout aux groupes d'appartenance
@@ -690,7 +819,7 @@ function Show-OnboardingForm {
                 if (-not $grpResult.Success) { $erreurs += "Groupe '$grp' : $($grpResult.Error)" }
             }
 
-            # 6b. Application des profils d'accès
+            # 7. Application des profils d'accès
             if ($script:OnbProfileKeys.Count -gt 0 -or ($Config.PSObject.Properties["access_profiles"] -and (Get-BaselineProfile))) {
                 $profileResult = Invoke-AccessProfileChange -UserId $newUserId -UPN $upn `
                     -OldProfileKeys @() -NewProfileKeys $script:OnbProfileKeys
@@ -699,7 +828,7 @@ function Show-OnboardingForm {
                 }
             }
 
-            # 7. Notification
+            # 8. Notification
             if ($Config.notifications.enabled) {
                 $sujet = "Onboarding - $prenom $nom ($upn)"
                 $corps = "<h2>Nouveau compte employé créé</h2>"
@@ -709,15 +838,16 @@ function Show-OnboardingForm {
                 $corps += "<tr><td><b>Poste :</b></td><td>$jobTitle</td></tr>"
                 $corps += "<tr><td><b>Département :</b></td><td>$dept</td></tr>"
                 $corps += "<tr><td><b>Type :</b></td><td>$empType</td></tr>"
-                if ($script:SelectedManagerName) {
-                    $corps += "<tr><td><b>Gestionnaire :</b></td><td>$($script:SelectedManagerName)</td></tr>"
+                $corps += "<tr><td><b>Gestionnaire :</b></td><td>$($script:SelectedManagerName)</td></tr>"
+                if ($licGroupes.Count -gt 0) {
+                    $corps += "<tr><td><b>Licences :</b></td><td>$($licGroupes -join ', ')</td></tr>"
                 }
                 $corps += "</table>"
                 $corps += "<p><em>Mot de passe temporaire transmis séparément.</em></p>"
                 Send-Notification -Sujet $sujet -Corps $corps
             }
 
-            # 8. Résultat
+            # 9. Résultat
             $lblChargement.Visible = $false
 
             if ($erreurs.Count -gt 0) {
@@ -727,7 +857,7 @@ function Show-OnboardingForm {
 
             Write-Log -Level "SUCCESS" -Action "ONBOARDING" -UPN $upn -Message "Onboarding terminé. Erreurs: $($erreurs.Count)"
 
-            # 9. Affichage du mot de passe (une seule fois)
+            # 10. Affichage du mot de passe (une seule fois)
             Show-PasswordDialog -UPN $upn -InitialToken $password
 
             $form.Close()
@@ -747,12 +877,3 @@ function Show-OnboardingForm {
     $form.ShowDialog() | Out-Null
     $form.Dispose()
 }
-
-# Point d'attention :
-# - Les champs dynamiques (department, jobTitle, etc.) sont chargés une fois à l'ouverture du formulaire
-# - Les ComboBox sont en mode "DropDown" (éditable) pour permettre la saisie libre de nouvelles valeurs
-# - Le bouton "Générer" construit les 3 variantes de UPN et vérifie leur unicité dans Azure AD
-# - Si un UPN existe déjà, le script ajoute une incrémentation (1, 2, 3...)
-# - La licence est gérée par ajout à un groupe (et non par assignation directe de SKU)
-# - Les groupes d'appartenance utilisent un CheckedListBox pour la sélection multiple
-# - Le mot de passe est généré UNIQUEMENT à la soumission et affiché une seule fois

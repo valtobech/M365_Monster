@@ -7,17 +7,7 @@
 
   "smtp_domain": "@domaine.com",
 
-  "license_groups": [
-    "LIC-Microsoft365-E3",
-    "LIC-Microsoft365-E5",
-    "LIC-Office365-F3"
-  ],
-
-  "membership_groups": [
-    "Tous-Employes",
-    "VPN-Access",
-    "Teams-General"
-  ],
+  "license_group_prefix": "LIC_",
 
   "access_profiles": {
     "Common": {

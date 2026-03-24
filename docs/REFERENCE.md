@@ -1,6 +1,6 @@
 # Référence Projet — M365 Monster
 
-> **Version :** 3.0
+> **Version :** 3.1
 > **Date :** 2026-03-24
 > **Portée :** Gestion du cycle de vie employé dans Microsoft 365 / Entra ID, avec interface graphique WinForms, multi-client, multi-langue.
 
@@ -264,6 +264,7 @@ Voir [CHANGELOG.md](CHANGELOG.md) pour le détail complet de chaque version.
 
 | Version | Date | Résumé |
 |---|---|---|
+| `0.1.9` | 2026-03-24 | Refonte onboarding : gestionnaire obligatoire, licences/groupes dynamiques, fenêtre redimensionnable, migration auto JSON |
 | `0.1.8` | 2026-03-24 | Nouveau module PIM Manager + Employee Type session Graph partagée |
 | `0.1.7` | 2026-02-28 | Nouveau module Profils d'accès (composables, réconciliation bidirectionnelle) |
 | `0.1.6` | 2026-02-25 | Performance SharedMailboxAudit : architecture 2 passes $filter (6min → 10s) |

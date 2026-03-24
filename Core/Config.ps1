@@ -13,6 +13,83 @@
     [Équipe IT — GestionRH-AzureAD]
 #>
 
+function Invoke-ConfigMigration {
+    <#
+    .SYNOPSIS
+        Migre un fichier de configuration client depuis l'ancien format vers le nouveau.
+        Détecte license_groups / membership_groups et les remplace par license_group_prefix.
+        Sauvegarde automatiquement le fichier si des changements sont effectués.
+
+    .PARAMETER ConfigObject
+        Objet de configuration parsé depuis le JSON.
+
+    .PARAMETER ConfigPath
+        Chemin du fichier JSON pour la sauvegarde automatique.
+
+    .OUTPUTS
+        [PSCustomObject] — Objet de configuration migré.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        $ConfigObject,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ConfigPath
+    )
+
+    $migrated = $false
+
+    # Migration license_groups → license_group_prefix
+    if ($ConfigObject.PSObject.Properties["license_groups"] -and -not $ConfigObject.PSObject.Properties["license_group_prefix"]) {
+        # Tenter d'extraire un préfixe commun des noms de groupes existants
+        $prefix = "LIC_"
+        $existingGroups = @($ConfigObject.license_groups)
+        if ($existingGroups.Count -gt 0) {
+            # Chercher un préfixe commun parmi les groupes (ex: LIC-, LIC_, License_)
+            $firstGroup = $existingGroups[0]
+            $separators = @('_', '-')
+            foreach ($sep in $separators) {
+                $parts = $firstGroup.Split($sep)
+                if ($parts.Count -ge 2) {
+                    $candidate = "$($parts[0])$sep"
+                    $allMatch = $existingGroups | ForEach-Object { $_.StartsWith($candidate) }
+                    if ($allMatch -notcontains $false) {
+                        $prefix = $candidate
+                        break
+                    }
+                }
+            }
+        }
+
+        $ConfigObject | Add-Member -NotePropertyName 'license_group_prefix' -NotePropertyValue $prefix -Force
+        $ConfigObject.PSObject.Properties.Remove('license_groups')
+        $migrated = $true
+        Write-Warning "Migration config : license_groups → license_group_prefix = '$prefix'"
+    }
+
+    # Suppression de membership_groups (plus utilisé — recherche dynamique)
+    if ($ConfigObject.PSObject.Properties["membership_groups"]) {
+        $ConfigObject.PSObject.Properties.Remove('membership_groups')
+        $migrated = $true
+        Write-Warning "Migration config : membership_groups supprimé (recherche dynamique activée)"
+    }
+
+    # Sauvegarde automatique si migration effectuée
+    if ($migrated) {
+        try {
+            $jsonContent = $ConfigObject | ConvertTo-Json -Depth 10
+            $jsonContent | Out-File -FilePath $ConfigPath -Encoding UTF8 -Force
+            Write-Warning "Migration config : fichier sauvegardé automatiquement → $ConfigPath"
+        }
+        catch {
+            Write-Warning "Migration config : impossible de sauvegarder le fichier migré : $($_.Exception.Message)"
+        }
+    }
+
+    return $ConfigObject
+}
+
 function Load-ClientConfig {
     <#
     .SYNOPSIS
@@ -45,6 +122,9 @@ function Load-ClientConfig {
         throw "Erreur lors du parsing JSON du fichier '$ConfigPath' : $($_.Exception.Message)"
     }
 
+    # Migration automatique des anciens formats de configuration
+    $configObject = Invoke-ConfigMigration -ConfigObject $configObject -ConfigPath $ConfigPath
+
     # Validation des champs obligatoires
     $champsObligatoires = @(
         'client_name',
@@ -52,8 +132,6 @@ function Load-ClientConfig {
         'client_id',
         'auth_method',
         'smtp_domain',
-        'license_groups',
-        'membership_groups',
         'offboarding',
         'notifications',
         'password_policy'

@@ -117,7 +117,17 @@
     "profile_preview_title": "Group Preview",
     "profile_preview_total": "Total: {0} group(s) to add",
     "profile_preview_source": "(profile: {0})",
-    "confirm_profiles": "Access profiles"
+    "confirm_profiles": "Access profiles",
+    "validation_manager": "Manager is required. Please search and select a manager.",
+    "license_prefix_info": "Groups loaded automatically (prefix: {0})",
+    "license_no_prefix": "No license prefix configured — set it in Settings.",
+    "group_search_label": "Search for a group",
+    "group_search_help": "Type at least 2 characters then click Search. Double-click a result to add it.",
+    "group_min_chars": "Enter at least 2 characters to search.",
+    "group_search_title": "Group search",
+    "group_no_result": "No group found.",
+    "group_selected_label": "Added groups",
+    "group_selected_count": "{0} group(s) selected"
   },
   "password_dialog": {
     "title": "Generated credentials",

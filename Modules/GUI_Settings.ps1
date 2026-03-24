@@ -5,11 +5,10 @@
 .ROLE
     Interface de parametrage client.
     Permet de lister, creer, editer et tester les fichiers de configuration JSON.
-    Adapte a la structure JSON actuelle :
-      - license_groups (noms de groupes pour assignation de licence)
-      - membership_groups (groupes d'appartenance)
-      - Plus de naming_convention, license_map, departments, contract_types
-        (ces valeurs sont desormais dynamiques depuis Azure AD)
+    Structure JSON :
+      - license_group_prefix (préfixe de nomenclature pour recherche dynamique des groupes de licence)
+      - Plus de license_groups ni membership_groups hardcodés
+        (licences = recherche par préfixe, groupes = recherche dynamique)
 
 .DEPENDANCES
     - Core/Config.ps1 (Get-ClientList)
@@ -98,11 +97,15 @@ function Show-SettingsForm {
     $btnAccessProfiles.Location = New-Object System.Drawing.Point(460, 45)
     $btnAccessProfiles.Size = New-Object System.Drawing.Size(200, 30)
     $btnAccessProfiles.FlatStyle = "Flat"
-    $btnAccessProfiles.BackColor = [System.Drawing.Color]::FromArgb(0, 123, 255)
+    $btnAccessProfiles.BackColor = [System.Drawing.Color]::DarkGray
     $btnAccessProfiles.ForeColor = [System.Drawing.Color]::White
+    $btnAccessProfiles.Enabled = $false
     $btnAccessProfiles.Add_Click({ Show-AccessProfileEditor })
     $form.Controls.Add($btnAccessProfiles)
-    
+
+    # Tooltip pour le bouton grisé
+    $ttProfiles = New-Object System.Windows.Forms.ToolTip
+    $ttProfiles.SetToolTip($btnAccessProfiles, "Sélectionnez et éditez un client existant pour gérer ses profils d'accès.")
 
     # Separateur
     $sep = New-Object System.Windows.Forms.Label
@@ -132,10 +135,9 @@ function Show-SettingsForm {
     $fldX = 175
     $fldW = 500
 
-    # --- Fonction utilitaire : ajouter un champ texte avec label ---
+    # --- Fonctions utilitaires ---
     function Add-EditField {
         param($Parent, $LabelText, [ref]$YPos, $DefaultValue = "")
-
         $lbl = New-Object System.Windows.Forms.Label
         $lbl.Text = $LabelText
         $lbl.Location = New-Object System.Drawing.Point(0, ($YPos.Value + 3))
@@ -152,7 +154,6 @@ function Show-SettingsForm {
         return $ctrl
     }
 
-    # --- Fonction utilitaire : ajouter un label de section ---
     function Add-SectionLabel {
         param($Parent, $Text, [ref]$YPos)
         $lbl = New-Object System.Windows.Forms.Label
@@ -165,7 +166,6 @@ function Show-SettingsForm {
         $YPos.Value += 24
     }
 
-    # --- Fonction utilitaire : ajouter un label d'aide ---
     function Add-HelpLabel {
         param($Parent, $Text, [ref]$YPos)
         $lbl = New-Object System.Windows.Forms.Label
@@ -212,26 +212,18 @@ function Show-SettingsForm {
 
     $yEdit += 8
 
-    # --- GROUPES DE LICENCE ---
-    Add-SectionLabel -Parent $panelEdit -Text "GROUPES DE LICENCE" -YPos ([ref]$yEdit)
+    # --- PRÉFIXE DE LICENCE ---
+    Add-SectionLabel -Parent $panelEdit -Text "LICENCE (RECHERCHE DYNAMIQUE)" -YPos ([ref]$yEdit)
 
-    $txtLicenseGroups = Add-EditField -Parent $panelEdit -LabelText "Groupes de licence" -YPos ([ref]$yEdit)
-    Add-HelpLabel -Parent $panelEdit -Text "Noms des groupes Entra ID pour les licences, separes par des virgules" -YPos ([ref]$yEdit)
-
-    $yEdit += 8
-
-    # --- GROUPES D'APPARTENANCE ---
-    Add-SectionLabel -Parent $panelEdit -Text "GROUPES D'APPARTENANCE" -YPos ([ref]$yEdit)
-
-    $txtMembershipGroups = Add-EditField -Parent $panelEdit -LabelText "Groupes membre" -YPos ([ref]$yEdit)
-    Add-HelpLabel -Parent $panelEdit -Text "Noms des groupes pour l'ajout des nouveaux employes, separes par des virgules" -YPos ([ref]$yEdit)
+    $txtLicensePrefix = Add-EditField -Parent $panelEdit -LabelText "Prefixe licence" -YPos ([ref]$yEdit) -DefaultValue "LIC_"
+    Add-HelpLabel -Parent $panelEdit -Text "Prefixe de nomenclature des groupes de licence (ex: LIC_, LIC-, License_). Laissez vide pour desactiver." -YPos ([ref]$yEdit)
 
     $yEdit += 8
 
     # --- OFFBOARDING ---
     Add-SectionLabel -Parent $panelEdit -Text "OFFBOARDING" -YPos ([ref]$yEdit)
 
-    $txtDisabledGroup   = Add-EditField -Parent $panelEdit -LabelText "Groupe desactives" -YPos ([ref]$yEdit) -DefaultValue "Comptes-Desactives"
+    $txtDisabledGroup = Add-EditField -Parent $panelEdit -LabelText "Groupe desactives" -YPos ([ref]$yEdit) -DefaultValue "Comptes-Desactives"
     Add-HelpLabel -Parent $panelEdit -Text "Groupe ou placer les comptes desactives lors de l'offboarding" -YPos ([ref]$yEdit)
 
     $yEdit += 8
@@ -280,8 +272,17 @@ function Show-SettingsForm {
         $txtClientId.Text        = $ConfigObj.client_id
         $cboAuth.SelectedItem    = $ConfigObj.auth_method
         $txtSmtpDomain.Text      = $ConfigObj.smtp_domain
-        $txtLicenseGroups.Text   = ($ConfigObj.license_groups -join ", ")
-        $txtMembershipGroups.Text = ($ConfigObj.membership_groups -join ", ")
+        # Préfixe licence — rétrocompatibilité avec ancien format
+        if ($ConfigObj.PSObject.Properties["license_group_prefix"]) {
+            $txtLicensePrefix.Text = $ConfigObj.license_group_prefix
+        }
+        elseif ($ConfigObj.PSObject.Properties["license_groups"] -and $ConfigObj.license_groups.Count -gt 0) {
+            # Migration : tenter d'extraire un préfixe commun des anciens groupes
+            $txtLicensePrefix.Text = "LIC_"
+        }
+        else {
+            $txtLicensePrefix.Text = ""
+        }
         $txtDisabledGroup.Text   = $ConfigObj.offboarding.disabled_ou_group
         $txtNotifRecipients.Text = ($ConfigObj.notifications.recipients -join ", ")
         $txtPasswordLength.Text  = $ConfigObj.password_policy.length.ToString()
@@ -290,52 +291,48 @@ function Show-SettingsForm {
     }
 
     function Build-ConfigFromForm {
-        # Transformer les champs texte separes par virgules en tableaux
-        $licGroups = @($txtLicenseGroups.Text.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
-        $memGroups = @($txtMembershipGroups.Text.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
         $notifList = @($txtNotifRecipients.Text.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
 
         $obj = [ordered]@{
-            client_name       = $txtClientName.Text.Trim()
-            tenant_id         = $txtTenantId.Text.Trim()
-            client_id         = $txtClientId.Text.Trim()
-            auth_method       = $cboAuth.SelectedItem.ToString()
-            smtp_domain       = $txtSmtpDomain.Text.Trim()
-            license_groups    = $licGroups
-            membership_groups = $memGroups
-            offboarding       = [ordered]@{
+            client_name          = $txtClientName.Text.Trim()
+            tenant_id            = $txtTenantId.Text.Trim()
+            client_id            = $txtClientId.Text.Trim()
+            auth_method          = $cboAuth.SelectedItem.ToString()
+            smtp_domain          = $txtSmtpDomain.Text.Trim()
+            license_group_prefix = $txtLicensePrefix.Text.Trim()
+            offboarding          = [ordered]@{
                 disabled_ou_group  = $txtDisabledGroup.Text.Trim()
                 mailbox_forward_to = ""
                 revoke_licenses    = $true
                 remove_all_groups  = $true
                 retention_days     = 30
             }
-            notifications     = [ordered]@{
+            notifications        = [ordered]@{
                 enabled    = ($notifList.Count -gt 0)
                 recipients = $notifList
             }
-            password_policy   = [ordered]@{
+            password_policy      = [ordered]@{
                 length                = [int]$txtPasswordLength.Text.Trim()
                 force_change_at_login = $chkForceChange.Checked
                 include_special_chars = $chkSpecialChars.Checked
             }
-
-            
         }
 
-                # Préserver les access_profiles du fichier existant si présents
+        # Préserver les access_profiles du fichier existant si présents
         if ($script:EditingFilePath -and (Test-Path $script:EditingFilePath)) {
             try {
                 $existingConfig = Get-Content -Path $script:EditingFilePath -Raw -Encoding UTF8 | ConvertFrom-Json
                 if ($existingConfig.PSObject.Properties["access_profiles"]) {
                     $obj["access_profiles"] = $existingConfig.access_profiles
                 }
+                # Préserver les pim_role_groups si présents
+                if ($existingConfig.PSObject.Properties["pim_role_groups"]) {
+                    $obj["pim_role_groups"] = $existingConfig.pim_role_groups
+                }
             } catch { }
         }
-        
-        return $obj
 
-        
+        return $obj
     }
 
     # =================================================================
@@ -353,11 +350,12 @@ function Show-SettingsForm {
             $txtTenantId.Text = ""
             $txtClientId.Text = ""
             $txtSmtpDomain.Text = "@domaine.com"
-            $txtLicenseGroups.Text = ""
-            $txtMembershipGroups.Text = ""
+            $txtLicensePrefix.Text = "LIC_"
         }
         $script:EditingFilePath = $null
         $lblEdit.Text = "Nouveau client"
+        $btnAccessProfiles.Enabled = $false
+        $btnAccessProfiles.BackColor = [System.Drawing.Color]::DarkGray
     })
 
     # Editer un client existant
@@ -369,6 +367,8 @@ function Show-SettingsForm {
                 Set-FormFromConfig -ConfigObj $configObj
                 $script:EditingFilePath = $selectedClient.FullPath
                 $lblEdit.Text = "Edition : $($selectedClient.Name)"
+                $btnAccessProfiles.Enabled = $true
+                $btnAccessProfiles.BackColor = [System.Drawing.Color]::FromArgb(0, 123, 255)
             }
             catch {
                 Show-ResultDialog -Titre "Erreur" -Message "Impossible de lire le fichier : $($_.Exception.Message)" -IsSuccess $false
@@ -387,6 +387,8 @@ function Show-SettingsForm {
                     Write-Log -Level "INFO" -Action "SETTINGS" -Message "Configuration supprimee : $($selectedClient.FileName)"
                     Update-ClientList
                     Show-ResultDialog -Titre "Succes" -Message "Configuration supprimee." -IsSuccess $true
+                    $btnAccessProfiles.Enabled = $false
+                    $btnAccessProfiles.BackColor = [System.Drawing.Color]::DarkGray
                 }
                 catch {
                     Show-ResultDialog -Titre "Erreur" -Message $_.Exception.Message -IsSuccess $false
