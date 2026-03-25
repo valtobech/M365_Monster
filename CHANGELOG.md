@@ -6,6 +6,81 @@ Versioning selon [Semantic Versioning](https://semver.org/lang/fr/).
 
 ---
 
+## [0.1.10] — 2026-03-24
+
+### Refonte — Module Offboarding (`GUI_Offboarding.ps1`)
+
+**Internationalisation complète**
+
+- Toutes les chaînes hardcodées remplacées par `Get-Text "offboarding.*"`. 70+ nouvelles clés i18n (FR + EN) dans la section `offboarding`.
+
+**Groupes dynamiques ignorés**
+
+- `Remove-AzUserGroups` détecte les groupes avec `groupTypes` contenant `DynamicMembership` et les skip automatiquement au lieu de provoquer une erreur 400 de Graph API.
+- Les groupes dynamiques skippés sont loggés individuellement et rapportés dans le récapitulatif (ex : « Retiré de 3 groupe(s). 2 groupe(s) dynamique(s) ignoré(s) »).
+- Nouveau champ `SkippedDynamic` dans l'objet retour de `Remove-AzUserGroups`.
+
+**Renommage automatique du jobTitle**
+
+- `Disable-AzUser` remplace le jobTitle par le format `DISABLE - A supprimer le JJ/MM/AAAA | Titre d'origine` (date = aujourd'hui + 3 mois).
+- Déclenche l'exclusion automatique des groupes dynamiques dont la règle contient `(user.jobTitle -notContains "DISABLE")`.
+- Le displayName n'est pas modifié.
+
+**Licences héritées de groupes ignorées**
+
+- `Remove-AzUserLicenses` lit `licenseAssignmentStates` pour distinguer les licences assignées directement (retirables) des licences héritées de groupes (`AssignedByGroup` non vide = skip).
+- Fallback si `licenseAssignmentStates` n'est pas disponible : tentative de retrait de toutes les licences avec gestion d'erreur par SKU.
+- Nouveau champ `SkippedInherited` dans l'objet retour.
+
+**Conversion en boîte partagée (Shared Mailbox)**
+
+- Nouvelle checkbox « Convertir en boîte partagée » dans le formulaire, décoché par défaut.
+- Activation conditionnelle : la checkbox n'est activable qu'après sélection d'un utilisateur et vérification réussie de la taille de la BAL via Exchange Online.
+- Vérification automatique de la taille BAL dès la sélection de l'utilisateur : label vert si ≤ 50 Go, warning orange si > 50 Go.
+- Si BAL > 50 Go et conversion cochée : panneau de sélection de licence Exchange affiché (même pattern `CheckedListBox` que l'onboarding, filtrage par `license_group_prefix`). Confirmation supplémentaire si aucune licence sélectionnée.
+- La conversion (`Set-Mailbox -Type Shared`) s'exécute **avant** la révocation des licences dans la séquence d'offboarding.
+- Nouvelle fonction `Get-AzMailboxSize` : wrapper `Get-EXOMailboxStatistics` avec parsing de `TotalItemSize` en Go.
+- Nouvelle fonction `Convert-AzMailboxToShared` : `Set-Mailbox -Identity $upn -Type Shared`.
+
+**Masquage du carnet d'adresses (GAL)**
+
+- Nouvelle checkbox « Masquer du carnet d'adresses (GAL) » cochée par défaut.
+- Dual-approach : Exchange Online (`Set-Mailbox -HiddenFromAddressListsEnabled $true`) avec fallback Graph API (`showInAddressList = $false`).
+- Nouvelle fonction `Hide-AzMailboxFromGAL` avec retour `Method` indiquant la méthode utilisée.
+
+**Délégation FullAccess (Read & Manage)**
+
+- Le champ « Rediriger mail vers » (jamais implémenté) est remplacé par « Déléguer accès » avec hint explicatif.
+- Si rempli, `Add-MailboxPermission -AccessRights FullAccess` est exécuté sur la boîte de l'utilisateur offboardé pour le délégué spécifié.
+- Nouvelle fonction `Grant-AzMailboxFullAccess` avec `AutoMapping = $true`.
+
+**Séquençage de l'offboarding**
+
+- Nouvel ordre d'exécution : Disable + JobTitle → Sessions → Groups (skip dynamic) → Hide GAL → Convert Shared → Add License Exchange → Delegate FullAccess → Remove Licenses → Disabled group → Notification.
+
+### Modifié — Module Onboarding (`GUI_Onboarding.ps1`)
+
+**Nouveaux champs**
+
+- **Employee Hire Date** : `DateTimePicker` pré-rempli avec la date du jour. Valeur transmise à Graph en format ISO 8601 (`yyyy-MM-ddT00:00:00Z`).
+- **Office Location** : `ComboBox` éditable alimenté dynamiquement par `Get-AzDistinctValues -Property officeLocation`. L'utilisateur peut sélectionner une valeur existante du tenant ou saisir une nouvelle valeur. Champ obligatoire.
+- **Company Name** : même pattern editable combo avec `Get-AzDistinctValues -Property companyName`. Champ obligatoire.
+
+**Modifié dans `New-AzUser` (GraphAPI.ps1)**
+
+- Gestion des propriétés `OfficeLocation`, `CompanyName` et `EmployeeHireDate` dans les paramètres optionnels de création.
+
+**Modifié dans `Get-AzDistinctValues` (GraphAPI.ps1)**
+
+- `companyName` ajouté au `ValidateSet` (en plus de `officeLocation` déjà présent).
+
+### Mis à jour — Fichiers de langue (`fr.json`, `en.json`)
+
+- 70+ nouvelles clés dans la section `offboarding` : formulaire, checkboxes, étapes, résultats, erreurs, confirmations, messages BAL/licence.
+- 6 nouvelles clés dans la section `onboarding` : `field_office_location`, `field_company_name`, `field_hire_date`, `validation_office_location`, `validation_company_name`, `confirm_office_location`, `confirm_company_name`, `confirm_hire_date`.
+
+---
+
 ## [0.1.9] — 2026-03-24
 
 ### Refonte — Module Onboarding (`GUI_Onboarding.ps1`)

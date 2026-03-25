@@ -1,6 +1,6 @@
 {
-  "version": "0.1.9",
+  "version": "0.1.10",
   "release_date": "2026-03-24",
   "minimum_ps_version": "7.0",
-  "release_notes": "Refonte onboarding : gestionnaire obligatoire, licences dynamiques par préfixe, groupes d'appartenance dynamiques, fenêtre redimensionnable. Migration auto des anciens JSON clients."
+  "release_notes": "Refonte offboarding : groupes dynamiques ignorés, conversion SharedMailbox, masquage GAL, délégation FullAccess, renommage jobTitle DISABLE. Onboarding : Office Location, Company Name, Hire Date."
 }
