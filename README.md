@@ -149,7 +149,7 @@ M365Monster/
 
 ## Développé par
 
-**LB Consultant** — [lbeconsultant.ca](https://lbeconsultant.ca)
+**VALTO Bech** 
 
 ## Licence
 
