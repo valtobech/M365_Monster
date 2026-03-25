@@ -160,6 +160,15 @@ function New-AzUser {
         if (-not [string]::IsNullOrWhiteSpace($UserParams.EmployeeId)) {
             $params.EmployeeId = $UserParams.EmployeeId
         }
+        if (-not [string]::IsNullOrWhiteSpace($UserParams.OfficeLocation)) {
+            $params.OfficeLocation = $UserParams.OfficeLocation
+        }
+        if (-not [string]::IsNullOrWhiteSpace($UserParams.CompanyName)) {
+            $params.CompanyName = $UserParams.CompanyName
+        }
+        if (-not [string]::IsNullOrWhiteSpace($UserParams.EmployeeHireDate)) {
+            $params.EmployeeHireDate = $UserParams.EmployeeHireDate
+        }
 
         $newUser = New-MgUser -BodyParameter $params -ErrorAction Stop
 
@@ -218,12 +227,17 @@ function Disable-AzUser {
     <#
     .SYNOPSIS
         Désactive un compte utilisateur Azure AD.
+        Remplace le jobTitle par le format :
+        "DISABLE - A supprimer le JJ/MM/AAAA | Titre d'origine"
+        (date = aujourd'hui + 3 mois)
+        Ceci déclenche aussi l'exclusion des groupes dynamiques dont la règle
+        contient (user.jobTitle -notContains "DISABLE").
 
     .PARAMETER UserId
         ID ou UPN de l'utilisateur.
 
     .OUTPUTS
-        [PSCustomObject] — {Success: bool, Error: string}
+        [PSCustomObject] — {Success: bool, Error: string, OriginalJobTitle: string}
     #>
     [CmdletBinding()]
     param(
@@ -234,15 +248,37 @@ function Disable-AzUser {
     try {
         Write-Log -Level "INFO" -Action "DISABLE_USER" -UPN $UserId -Message "Désactivation du compte."
 
-        Update-MgUser -UserId $UserId -BodyParameter @{ AccountEnabled = $false } -ErrorAction Stop
+        # Récupérer le jobTitle actuel
+        $user = Get-MgUser -UserId $UserId -Property "jobTitle" -ErrorAction Stop
+        $originalJobTitle = $user.JobTitle
+
+        # Paramètres de base : désactiver le compte
+        $bodyParams = @{ AccountEnabled = $false }
+
+        # Remplacement du jobTitle : "DISABLE - A supprimer le JJ/MM/AAAA | Titre d'origine"
+        $deleteDate = (Get-Date).AddMonths(3).ToString("dd/MM/yyyy")
+        $titlePart = if (-not [string]::IsNullOrWhiteSpace($originalJobTitle)) { $originalJobTitle } else { "N/A" }
+
+        # Ne modifier que si pas déjà au format DISABLE
+        if ($originalJobTitle -notlike "DISABLE -*") {
+            $newJobTitle = "DISABLE - A supprimer le $deleteDate | $titlePart"
+            $bodyParams["JobTitle"] = $newJobTitle
+            Write-Log -Level "INFO" -Action "DISABLE_USER" -UPN $UserId -Message "JobTitle modifié : '$originalJobTitle' → '$newJobTitle'"
+        }
+
+        Update-MgUser -UserId $UserId -BodyParameter $bodyParams -ErrorAction Stop
 
         Write-Log -Level "SUCCESS" -Action "DISABLE_USER" -UPN $UserId -Message "Compte désactivé."
-        return [PSCustomObject]@{ Success = $true; Error = $null }
+        return [PSCustomObject]@{
+            Success          = $true
+            Error            = $null
+            OriginalJobTitle = $originalJobTitle
+        }
     }
     catch {
         $errMsg = $_.Exception.Message
         Write-Log -Level "ERROR" -Action "DISABLE_USER" -UPN $UserId -Message "Erreur désactivation : $errMsg"
-        return [PSCustomObject]@{ Success = $false; Error = $errMsg }
+        return [PSCustomObject]@{ Success = $false; Error = $errMsg; OriginalJobTitle = $null }
     }
 }
 
@@ -340,12 +376,15 @@ function Remove-AzUserGroups {
     <#
     .SYNOPSIS
         Retire un utilisateur de tous ses groupes Azure AD.
+        Les groupes dynamiques (DynamicMembership) sont automatiquement ignorés
+        car leurs membres sont gérés par règle — toute tentative de retrait
+        provoquerait une erreur 400 de Graph API.
 
     .PARAMETER UserId
         ID de l'utilisateur.
 
     .OUTPUTS
-        [PSCustomObject] — {Success: bool, RemovedCount: int, Errors: array, Error: string}
+        [PSCustomObject] — {Success: bool, RemovedCount: int, SkippedDynamic: int, Errors: array, Error: string}
     #>
     [CmdletBinding()]
     param(
@@ -359,10 +398,21 @@ function Remove-AzUserGroups {
         $groupes = Get-MgUserMemberOf -UserId $UserId -ErrorAction Stop
         $erreurs = @()
         $compteur = 0
+        $dynamicSkipped = 0
 
         foreach ($membre in $groupes) {
-            # CHOIX: On ne retire que les groupes (pas les rôles d'annuaire)
+            # On ne retire que les groupes (pas les rôles d'annuaire)
             if ($membre.AdditionalProperties.'@odata.type' -eq '#microsoft.graph.group') {
+
+                # Vérifier si c'est un groupe dynamique — on skip
+                $groupTypes = $membre.AdditionalProperties.groupTypes
+                if ($groupTypes -and ($groupTypes -contains "DynamicMembership")) {
+                    $grpName = $membre.AdditionalProperties.displayName
+                    Write-Log -Level "INFO" -Action "REMOVE_GROUPS" -UPN $UserId -Message "Groupe dynamique ignoré : '$grpName' ($($membre.Id))"
+                    $dynamicSkipped++
+                    continue
+                }
+
                 try {
                     Remove-MgGroupMemberByRef -GroupId $membre.Id -DirectoryObjectId $UserId -ErrorAction Stop
                     $compteur++
@@ -374,6 +424,9 @@ function Remove-AzUserGroups {
         }
 
         $msg = "Retiré de $compteur groupe(s)."
+        if ($dynamicSkipped -gt 0) {
+            $msg += " $dynamicSkipped groupe(s) dynamique(s) ignoré(s)."
+        }
         if ($erreurs.Count -gt 0) {
             $msg += " $($erreurs.Count) erreur(s)."
             Write-Log -Level "WARNING" -Action "REMOVE_GROUPS" -UPN $UserId -Message $msg
@@ -383,16 +436,17 @@ function Remove-AzUserGroups {
         }
 
         return [PSCustomObject]@{
-            Success      = ($erreurs.Count -eq 0)
-            RemovedCount = $compteur
-            Errors       = $erreurs
-            Error        = if ($erreurs.Count -gt 0) { $erreurs -join "`n" } else { $null }
+            Success        = ($erreurs.Count -eq 0)
+            RemovedCount   = $compteur
+            SkippedDynamic = $dynamicSkipped
+            Errors         = $erreurs
+            Error          = if ($erreurs.Count -gt 0) { $erreurs -join "`n" } else { $null }
         }
     }
     catch {
         $errMsg = $_.Exception.Message
         Write-Log -Level "ERROR" -Action "REMOVE_GROUPS" -UPN $UserId -Message "Erreur retrait groupes : $errMsg"
-        return [PSCustomObject]@{ Success = $false; RemovedCount = 0; Errors = @($errMsg); Error = $errMsg }
+        return [PSCustomObject]@{ Success = $false; RemovedCount = 0; SkippedDynamic = 0; Errors = @($errMsg); Error = $errMsg }
     }
 }
 
@@ -455,13 +509,15 @@ function Set-AzUserLicense {
 function Remove-AzUserLicenses {
     <#
     .SYNOPSIS
-        Révoque toutes les licences d'un utilisateur Azure AD.
+        Révoque les licences assignées directement à un utilisateur Azure AD.
+        Les licences héritées de groupes (group-based licensing) sont ignorées
+        car elles ne peuvent pas être retirées directement de l'utilisateur.
 
     .PARAMETER UserId
         ID de l'utilisateur.
 
     .OUTPUTS
-        [PSCustomObject] — {Success: bool, RemovedCount: int, Error: string}
+        [PSCustomObject] — {Success: bool, RemovedCount: int, SkippedInherited: int, Error: string}
     #>
     [CmdletBinding()]
     param(
@@ -472,31 +528,73 @@ function Remove-AzUserLicenses {
     try {
         Write-Log -Level "INFO" -Action "REVOKE_LICENSES" -UPN $UserId -Message "Révocation de toutes les licences."
 
-        $user = Get-MgUser -UserId $UserId -Property "assignedLicenses" -ErrorAction Stop
+        $user = Get-MgUser -UserId $UserId -Property "assignedLicenses,licenseAssignmentStates" -ErrorAction Stop
         $licences = $user.AssignedLicenses
 
         if ($null -eq $licences -or $licences.Count -eq 0) {
             Write-Log -Level "INFO" -Action "REVOKE_LICENSES" -UPN $UserId -Message "Aucune licence à révoquer."
-            return [PSCustomObject]@{ Success = $true; RemovedCount = 0; Error = $null }
+            return [PSCustomObject]@{ Success = $true; RemovedCount = 0; SkippedInherited = 0; Error = $null }
         }
 
-        $skuIds = $licences | ForEach-Object { $_.SkuId }
+        # Identifier les licences assignées directement vs héritées de groupes
+        # licenseAssignmentStates contient l'origine de chaque licence :
+        #   - assignedByGroup = $null ou vide → assignée directement
+        #   - assignedByGroup = GUID → héritée d'un groupe
+        $directSkuIds = @()
+        $inheritedCount = 0
+
+        $assignmentStates = $user.LicenseAssignmentStates
+        if ($null -ne $assignmentStates -and $assignmentStates.Count -gt 0) {
+            foreach ($state in $assignmentStates) {
+                if ([string]::IsNullOrWhiteSpace($state.AssignedByGroup)) {
+                    # Licence assignée directement
+                    $directSkuIds += $state.SkuId
+                }
+                else {
+                    $inheritedCount++
+                    Write-Log -Level "INFO" -Action "REVOKE_LICENSES" -UPN $UserId -Message "Licence héritée ignorée : SkuId=$($state.SkuId), Groupe=$($state.AssignedByGroup)"
+                }
+            }
+            # Dédupliquer (une licence peut apparaître en direct ET en groupe)
+            $directSkuIds = $directSkuIds | Select-Object -Unique
+        }
+        else {
+            # Fallback : si licenseAssignmentStates n'est pas disponible,
+            # tenter de retirer toutes les licences et gérer l'erreur par SKU
+            $directSkuIds = $licences | ForEach-Object { $_.SkuId }
+            Write-Log -Level "WARNING" -Action "REVOKE_LICENSES" -UPN $UserId -Message "LicenseAssignmentStates indisponible — tentative de retrait de toutes les licences."
+        }
+
+        if ($directSkuIds.Count -eq 0) {
+            $msg = "Aucune licence directe à révoquer. $inheritedCount licence(s) héritée(s) de groupes ignorée(s)."
+            Write-Log -Level "INFO" -Action "REVOKE_LICENSES" -UPN $UserId -Message $msg
+            return [PSCustomObject]@{ Success = $true; RemovedCount = 0; SkippedInherited = $inheritedCount; Error = $null }
+        }
 
         $params = @{
             AddLicenses    = @()
-            RemoveLicenses = $skuIds
+            RemoveLicenses = $directSkuIds
         }
 
         Set-MgUserLicense -UserId $UserId -BodyParameter $params -ErrorAction Stop
 
-        $count = $skuIds.Count
-        Write-Log -Level "SUCCESS" -Action "REVOKE_LICENSES" -UPN $UserId -Message "$count licence(s) révoquée(s)."
-        return [PSCustomObject]@{ Success = $true; RemovedCount = $count; Error = $null }
+        $msg = "$($directSkuIds.Count) licence(s) directe(s) révoquée(s)."
+        if ($inheritedCount -gt 0) {
+            $msg += " $inheritedCount licence(s) héritée(s) de groupes ignorée(s)."
+        }
+        Write-Log -Level "SUCCESS" -Action "REVOKE_LICENSES" -UPN $UserId -Message $msg
+
+        return [PSCustomObject]@{
+            Success          = $true
+            RemovedCount     = $directSkuIds.Count
+            SkippedInherited = $inheritedCount
+            Error            = $null
+        }
     }
     catch {
         $errMsg = $_.Exception.Message
         Write-Log -Level "ERROR" -Action "REVOKE_LICENSES" -UPN $UserId -Message "Erreur révocation licences : $errMsg"
-        return [PSCustomObject]@{ Success = $false; RemovedCount = 0; Error = $errMsg }
+        return [PSCustomObject]@{ Success = $false; RemovedCount = 0; SkippedInherited = 0; Error = $errMsg }
     }
 }
 
@@ -709,7 +807,7 @@ function Get-AzDistinctValues {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet("department", "jobTitle", "employeeType", "usageLocation", "officeLocation")]
+        [ValidateSet("department", "jobTitle", "employeeType", "usageLocation", "officeLocation", "companyName")]
         [string]$Property,
 
         [int]$MaxUsers = 999
@@ -861,7 +959,203 @@ function Remove-AzUserFromGroup {
 }
 
 
+# =============================================================================
+# FONCTIONS EXCHANGE ONLINE — Offboarding (conversion boîte partagée, GAL, taille)
+# =============================================================================
 
+function Get-AzMailboxSize {
+    <#
+    .SYNOPSIS
+        Récupère la taille de la boîte aux lettres d'un utilisateur via Exchange Online.
 
+    .PARAMETER Identity
+        UPN ou adresse email de l'utilisateur.
 
+    .OUTPUTS
+        [PSCustomObject] — {Success: bool, SizeGB: double, SizeDisplay: string, Error: string}
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Identity
+    )
 
+    try {
+        Write-Log -Level "INFO" -Action "GET_MAILBOX_SIZE" -UPN $Identity -Message "Récupération de la taille de la boîte aux lettres."
+
+        $stats = Get-EXOMailboxStatistics -Identity $Identity -ErrorAction Stop
+
+        # Extraction de la taille en octets depuis TotalItemSize
+        # Format typique : "1.234 GB (1,324,567,890 bytes)" ou variantes localisées
+        $totalItemSize = $stats.TotalItemSize.ToString()
+        $sizeBytes = 0
+
+        if ($totalItemSize -match '\(([0-9,\.]+)\s+bytes\)') {
+            $sizeBytes = [double]($Matches[1] -replace '[,\.]', '')
+        }
+        elseif ($totalItemSize -match '([0-9,\.]+)\s+bytes') {
+            $sizeBytes = [double]($Matches[1] -replace '[,\.]', '')
+        }
+        else {
+            # Fallback : valeur brute de la propriété Value si disponible
+            try {
+                $sizeBytes = $stats.TotalItemSize.Value.ToBytes()
+            }
+            catch {
+                Write-Log -Level "WARNING" -Action "GET_MAILBOX_SIZE" -UPN $Identity -Message "Impossible de parser la taille : $totalItemSize"
+            }
+        }
+
+        $sizeGB = [math]::Round($sizeBytes / 1GB, 2)
+
+        Write-Log -Level "SUCCESS" -Action "GET_MAILBOX_SIZE" -UPN $Identity -Message "Taille : $sizeGB Go ($totalItemSize)"
+        return [PSCustomObject]@{
+            Success     = $true
+            SizeGB      = $sizeGB
+            SizeDisplay = $totalItemSize
+            Error       = $null
+        }
+    }
+    catch {
+        $errMsg = $_.Exception.Message
+        Write-Log -Level "ERROR" -Action "GET_MAILBOX_SIZE" -UPN $Identity -Message "Erreur récupération taille BAL : $errMsg"
+        return [PSCustomObject]@{ Success = $false; SizeGB = 0; SizeDisplay = ""; Error = $errMsg }
+    }
+}
+
+function Convert-AzMailboxToShared {
+    <#
+    .SYNOPSIS
+        Convertit une boîte aux lettres utilisateur en boîte partagée (Shared Mailbox).
+        Requiert une session Exchange Online active.
+
+    .PARAMETER Identity
+        UPN ou adresse email de l'utilisateur.
+
+    .OUTPUTS
+        [PSCustomObject] — {Success: bool, Error: string}
+
+    .NOTES
+        - Les boîtes partagées ont une limite de 50 Go sans licence.
+        - Au-delà de 50 Go, une licence Exchange Online Plan 1 ou Plan 2 est requise.
+        - La conversion doit se faire AVANT la révocation des licences Exchange.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Identity
+    )
+
+    try {
+        Write-Log -Level "INFO" -Action "CONVERT_SHARED" -UPN $Identity -Message "Conversion de la BAL en boîte partagée."
+
+        Set-Mailbox -Identity $Identity -Type Shared -ErrorAction Stop
+
+        Write-Log -Level "SUCCESS" -Action "CONVERT_SHARED" -UPN $Identity -Message "BAL convertie en boîte partagée."
+        return [PSCustomObject]@{ Success = $true; Error = $null }
+    }
+    catch {
+        $errMsg = $_.Exception.Message
+        Write-Log -Level "ERROR" -Action "CONVERT_SHARED" -UPN $Identity -Message "Erreur conversion BAL partagée : $errMsg"
+        return [PSCustomObject]@{ Success = $false; Error = $errMsg }
+    }
+}
+
+function Hide-AzMailboxFromGAL {
+    <#
+    .SYNOPSIS
+        Cache une boîte aux lettres du carnet d'adresses global (GAL).
+        Tente d'abord via Exchange Online (Set-Mailbox), puis fallback Graph API.
+
+    .PARAMETER Identity
+        UPN ou adresse email de l'utilisateur.
+
+    .PARAMETER UserId
+        ID Entra de l'utilisateur (utilisé pour le fallback Graph).
+
+    .OUTPUTS
+        [PSCustomObject] — {Success: bool, Method: string, Error: string}
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Identity,
+
+        [string]$UserId = ""
+    )
+
+    try {
+        Write-Log -Level "INFO" -Action "HIDE_FROM_GAL" -UPN $Identity -Message "Masquage de la BAL dans le carnet d'adresses global."
+
+        # Tentative Exchange Online d'abord
+        try {
+            Set-Mailbox -Identity $Identity -HiddenFromAddressListsEnabled $true -ErrorAction Stop
+            Write-Log -Level "SUCCESS" -Action "HIDE_FROM_GAL" -UPN $Identity -Message "BAL masquée du GAL via Exchange Online."
+            return [PSCustomObject]@{ Success = $true; Method = "ExchangeOnline"; Error = $null }
+        }
+        catch {
+            Write-Log -Level "WARNING" -Action "HIDE_FROM_GAL" -UPN $Identity -Message "Exchange Online échoué, tentative Graph API. Erreur EXO : $($_.Exception.Message)"
+        }
+
+        # Fallback Graph API — showInAddressList
+        if (-not [string]::IsNullOrWhiteSpace($UserId)) {
+            Update-MgUser -UserId $UserId -BodyParameter @{ ShowInAddressList = $false } -ErrorAction Stop
+            Write-Log -Level "SUCCESS" -Action "HIDE_FROM_GAL" -UPN $Identity -Message "BAL masquée du GAL via Graph API."
+            return [PSCustomObject]@{ Success = $true; Method = "GraphAPI"; Error = $null }
+        }
+        else {
+            throw "Exchange Online échoué et aucun UserId fourni pour le fallback Graph API."
+        }
+    }
+    catch {
+        $errMsg = $_.Exception.Message
+        Write-Log -Level "ERROR" -Action "HIDE_FROM_GAL" -UPN $Identity -Message "Erreur masquage GAL : $errMsg"
+        return [PSCustomObject]@{ Success = $false; Method = ""; Error = $errMsg }
+    }
+}
+
+function Grant-AzMailboxFullAccess {
+    <#
+    .SYNOPSIS
+        Ajoute les permissions FullAccess (Read and Manage) sur une boîte aux lettres
+        pour un utilisateur délégué. Requiert Exchange Online.
+
+    .PARAMETER MailboxIdentity
+        UPN ou adresse email de la boîte aux lettres cible.
+
+    .PARAMETER DelegateUPN
+        UPN de l'utilisateur qui recevra l'accès FullAccess.
+
+    .PARAMETER AutoMapping
+        Si $true (défaut), la boîte apparaîtra automatiquement dans Outlook du délégué.
+
+    .OUTPUTS
+        [PSCustomObject] — {Success: bool, Error: string}
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$MailboxIdentity,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DelegateUPN,
+
+        [bool]$AutoMapping = $true
+    )
+
+    try {
+        Write-Log -Level "INFO" -Action "GRANT_FULLACCESS" -UPN $MailboxIdentity -Message "Ajout FullAccess pour '$DelegateUPN' (AutoMapping=$AutoMapping)."
+
+        Add-MailboxPermission -Identity $MailboxIdentity -User $DelegateUPN `
+            -AccessRights FullAccess -InheritanceType All `
+            -AutoMapping $AutoMapping -ErrorAction Stop | Out-Null
+
+        Write-Log -Level "SUCCESS" -Action "GRANT_FULLACCESS" -UPN $MailboxIdentity -Message "FullAccess accordé à '$DelegateUPN'."
+        return [PSCustomObject]@{ Success = $true; Error = $null }
+    }
+    catch {
+        $errMsg = $_.Exception.Message
+        Write-Log -Level "ERROR" -Action "GRANT_FULLACCESS" -UPN $MailboxIdentity -Message "Erreur ajout FullAccess pour '$DelegateUPN' : $errMsg"
+        return [PSCustomObject]@{ Success = $false; Error = $errMsg }
+    }
+}

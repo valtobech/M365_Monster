@@ -34,7 +34,7 @@ function Show-OnboardingForm {
     # Chargement des données dynamiques depuis Azure AD
     # =================================================================
     $dynData = @{}
-    foreach ($prop in @("department", "jobTitle", "employeeType", "usageLocation")) {
+    foreach ($prop in @("department", "jobTitle", "employeeType", "usageLocation", "officeLocation", "companyName")) {
         $res = Get-AzDistinctValues -Property $prop
         $dynData[$prop] = if ($res.Success) { $res.Data } else { @() }
     }
@@ -225,6 +225,28 @@ function Show-OnboardingForm {
     $txtEmployeeId.Location = New-Object System.Drawing.Point($fldX, $yPos)
     $txtEmployeeId.Size = New-Object System.Drawing.Size($fldW, 25)
     $panelMain.Controls.Add($txtEmployeeId)
+    $yPos += $lineH
+
+    # --- Office Location — obligatoire, editable combo avec valeurs du tenant ---
+    Add-Label -Text (Get-Text "onboarding.field_office_location") -Y $yPos -Required $true
+    $cboOfficeLocation = New-EditableCombo -Items $dynData["officeLocation"] -Y $yPos
+    $panelMain.Controls.Add($cboOfficeLocation)
+    $yPos += $lineH
+
+    # --- Company Name — obligatoire, editable combo avec valeurs du tenant ---
+    Add-Label -Text (Get-Text "onboarding.field_company_name") -Y $yPos -Required $true
+    $cboCompanyName = New-EditableCombo -Items $dynData["companyName"] -Y $yPos
+    $panelMain.Controls.Add($cboCompanyName)
+    $yPos += $lineH
+
+    # --- Employee Hire Date — pré-rempli avec la date du jour ---
+    Add-Label -Text (Get-Text "onboarding.field_hire_date") -Y $yPos -Required $false
+    $dtpHireDate = New-Object System.Windows.Forms.DateTimePicker
+    $dtpHireDate.Location = New-Object System.Drawing.Point($fldX, $yPos)
+    $dtpHireDate.Size = New-Object System.Drawing.Size(200, 25)
+    $dtpHireDate.Format = "Short"
+    $dtpHireDate.Value = (Get-Date)
+    $panelMain.Controls.Add($dtpHireDate)
     $yPos += $lineH
 
     # --- Gestionnaire (Manager) — recherche dynamique — OBLIGATOIRE ---
@@ -671,20 +693,24 @@ function Show-OnboardingForm {
         $lblErreur.Visible = $false
 
         # --- Validation des champs obligatoires ---
-        $nom       = $txtNom.Text.Trim()
-        $prenom    = $txtPrenom.Text.Trim()
-        $jobTitle  = $cboJobTitle.Text.Trim()
-        $dept      = $cboDepartment.Text.Trim()
-        $empType   = $cboEmployeeType.Text.Trim()
-        $usageLoc  = $cboUsageLocation.Text.Trim()
+        $nom         = $txtNom.Text.Trim()
+        $prenom      = $txtPrenom.Text.Trim()
+        $jobTitle    = $cboJobTitle.Text.Trim()
+        $dept        = $cboDepartment.Text.Trim()
+        $empType     = $cboEmployeeType.Text.Trim()
+        $usageLoc    = $cboUsageLocation.Text.Trim()
+        $officeLoc   = $cboOfficeLocation.Text.Trim()
+        $companyName = $cboCompanyName.Text.Trim()
 
         $validations = @(
-            @{ Value = $nom;      Key = "onboarding.validation_lastname" },
-            @{ Value = $prenom;   Key = "onboarding.validation_firstname" },
-            @{ Value = $jobTitle; Key = "onboarding.validation_job_title" },
-            @{ Value = $dept;     Key = "onboarding.validation_department" },
-            @{ Value = $empType;  Key = "onboarding.validation_employee_type" },
-            @{ Value = $usageLoc; Key = "onboarding.validation_usage_location" }
+            @{ Value = $nom;         Key = "onboarding.validation_lastname" },
+            @{ Value = $prenom;      Key = "onboarding.validation_firstname" },
+            @{ Value = $jobTitle;    Key = "onboarding.validation_job_title" },
+            @{ Value = $dept;        Key = "onboarding.validation_department" },
+            @{ Value = $empType;     Key = "onboarding.validation_employee_type" },
+            @{ Value = $usageLoc;    Key = "onboarding.validation_usage_location" },
+            @{ Value = $officeLoc;   Key = "onboarding.validation_office_location" },
+            @{ Value = $companyName; Key = "onboarding.validation_company_name" }
         )
         foreach ($v in $validations) {
             if ([string]::IsNullOrWhiteSpace($v.Value)) {
@@ -718,6 +744,9 @@ function Show-OnboardingForm {
         $confirmMsg += "$(Get-Text 'onboarding.confirm_department')     : $dept`n"
         $confirmMsg += "$(Get-Text 'onboarding.confirm_employee_type')   : $empType`n"
         $confirmMsg += "$(Get-Text 'onboarding.confirm_usage_location')  : $usageLoc`n"
+        $confirmMsg += "$(Get-Text 'onboarding.confirm_office_location') : $officeLoc`n"
+        $confirmMsg += "$(Get-Text 'onboarding.confirm_company_name')    : $companyName`n"
+        $confirmMsg += "$(Get-Text 'onboarding.confirm_hire_date')       : $($dtpHireDate.Value.ToString('yyyy-MM-dd'))`n"
         if (-not [string]::IsNullOrWhiteSpace($txtEmployeeId.Text)) {
             $confirmMsg += "$(Get-Text 'onboarding.confirm_employee_id')       : $($txtEmployeeId.Text.Trim())`n"
         }
@@ -787,6 +816,9 @@ function Show-OnboardingForm {
                 JobTitle          = $jobTitle
                 EmployeeType      = $empType
                 UsageLocation     = $usageLoc
+                OfficeLocation    = $officeLoc
+                CompanyName       = $companyName
+                EmployeeHireDate  = $dtpHireDate.Value.ToString("yyyy-MM-ddT00:00:00Z")
                 ForceChangePasswordNextSignIn = $Config.password_policy.force_change_at_login
             }
 

@@ -5,12 +5,16 @@
 .ROLE
     Formulaire de depart (offboarding) d'un employe.
     Gere la desactivation du compte, la revocation des licences et sessions,
-    le retrait des groupes, et la notification.
+    le retrait des groupes (avec skip des groupes dynamiques),
+    la conversion en boite partagee, le masquage du GAL, et la notification.
 
 .DEPENDANCES
     - Core/Functions.ps1 (Write-Log, Show-ConfirmDialog, Show-ResultDialog, Send-Notification)
     - Core/GraphAPI.ps1 (Search-AzUsers, Disable-AzUser, Revoke-AzUserSessions,
-      Remove-AzUserGroups, Remove-AzUserLicenses, Add-AzUserToGroup)
+      Remove-AzUserGroups, Remove-AzUserLicenses, Add-AzUserToGroup,
+      Get-AzMailboxSize, Convert-AzMailboxToShared, Hide-AzMailboxFromGAL,
+      Search-AzGroups)
+    - Module ExchangeOnlineManagement (Get-EXOMailboxStatistics, Set-Mailbox)
     - Variable globale $Config
 
 .AUTEUR
@@ -25,9 +29,26 @@ function Show-OffboardingForm {
         [void] - Formulaire modal.
     #>
 
+    # === Variables de scope ===
+    $script:SelectedUserId = $null
+    $script:SelectedUserUPN = $null
+    $script:SelectedUserName = $null
+    $script:SearchResults = @()
+    $script:MailboxSizeGB = 0
+    $script:ExchangeAvailable = $false
+    $script:LicenseGroupNames = @()
+
+    # Vérifier si Exchange Online est disponible
+    try {
+        $exoSession = Get-Command "Get-EXOMailboxStatistics" -ErrorAction SilentlyContinue
+        $script:ExchangeAvailable = ($null -ne $exoSession)
+    }
+    catch { $script:ExchangeAvailable = $false }
+
+    # === Formulaire principal ===
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Offboarding - Depart employe - $($Config.client_name)"
-    $form.Size = New-Object System.Drawing.Size(620, 620)
+    $form.Text = Get-Text "offboarding.title" $Config.client_name
+    $form.Size = New-Object System.Drawing.Size(660, 760)
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = "FixedDialog"
     $form.MaximizeBox = $false
@@ -36,19 +57,21 @@ function Show-OffboardingForm {
 
     $yPos = 15
 
-    # === Titre ===
+    # =================================================================
+    # SECTION : Recherche de l'employe
+    # =================================================================
     $lblSection = New-Object System.Windows.Forms.Label
-    $lblSection.Text = "Recherche de l'employe"
+    $lblSection.Text = Get-Text "offboarding.section_search"
     $lblSection.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
     $lblSection.ForeColor = [System.Drawing.Color]::FromArgb(33, 37, 41)
     $lblSection.Location = New-Object System.Drawing.Point(15, $yPos)
-    $lblSection.Size = New-Object System.Drawing.Size(560, 25)
+    $lblSection.Size = New-Object System.Drawing.Size(600, 25)
     $form.Controls.Add($lblSection)
     $yPos += 35
 
-    # === Barre de recherche ===
+    # Barre de recherche
     $lblRecherche = New-Object System.Windows.Forms.Label
-    $lblRecherche.Text = "Rechercher :"
+    $lblRecherche.Text = Get-Text "offboarding.search_label"
     $lblRecherche.Font = New-Object System.Drawing.Font("Segoe UI", 9)
     $lblRecherche.Location = New-Object System.Drawing.Point(15, ($yPos + 3))
     $lblRecherche.Size = New-Object System.Drawing.Size(90, 20)
@@ -56,13 +79,13 @@ function Show-OffboardingForm {
 
     $txtRecherche = New-Object System.Windows.Forms.TextBox
     $txtRecherche.Location = New-Object System.Drawing.Point(110, $yPos)
-    $txtRecherche.Size = New-Object System.Drawing.Size(380, 25)
+    $txtRecherche.Size = New-Object System.Drawing.Size(420, 25)
     $txtRecherche.Font = New-Object System.Drawing.Font("Segoe UI", 9)
     $form.Controls.Add($txtRecherche)
 
     $btnRecherche = New-Object System.Windows.Forms.Button
-    $btnRecherche.Text = "Chercher"
-    $btnRecherche.Location = New-Object System.Drawing.Point(500, $yPos)
+    $btnRecherche.Text = Get-Text "offboarding.btn_search"
+    $btnRecherche.Location = New-Object System.Drawing.Point(540, $yPos)
     $btnRecherche.Size = New-Object System.Drawing.Size(90, 25)
     $form.Controls.Add($btnRecherche)
     $yPos += 33
@@ -70,7 +93,7 @@ function Show-OffboardingForm {
     # Liste de resultats
     $lstResultats = New-Object System.Windows.Forms.ListBox
     $lstResultats.Location = New-Object System.Drawing.Point(110, $yPos)
-    $lstResultats.Size = New-Object System.Drawing.Size(380, 80)
+    $lstResultats.Size = New-Object System.Drawing.Size(420, 80)
     $lstResultats.Font = New-Object System.Drawing.Font("Segoe UI", 9)
     $lstResultats.Visible = $false
     $form.Controls.Add($lstResultats)
@@ -80,73 +103,35 @@ function Show-OffboardingForm {
     $lblUserInfo.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
     $lblUserInfo.ForeColor = [System.Drawing.Color]::FromArgb(0, 123, 255)
     $lblUserInfo.Location = New-Object System.Drawing.Point(15, ($yPos + 85))
-    $lblUserInfo.Size = New-Object System.Drawing.Size(560, 20)
+    $lblUserInfo.Size = New-Object System.Drawing.Size(600, 20)
     $lblUserInfo.Visible = $false
     $form.Controls.Add($lblUserInfo)
 
-    $script:SelectedUserId = $null
-    $script:SelectedUserUPN = $null
-    $script:SelectedUserName = $null
-    $script:SearchResults = @()
+    # Info taille BAL (affichée après sélection)
+    $lblMailboxInfo = New-Object System.Windows.Forms.Label
+    $lblMailboxInfo.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $lblMailboxInfo.Location = New-Object System.Drawing.Point(15, ($yPos + 107))
+    $lblMailboxInfo.Size = New-Object System.Drawing.Size(600, 20)
+    $lblMailboxInfo.Visible = $false
+    $form.Controls.Add($lblMailboxInfo)
 
-    # Recherche
-    $btnRecherche.Add_Click({
-        $terme = $txtRecherche.Text.Trim()
-        if ($terme.Length -lt 2) {
-            [System.Windows.Forms.MessageBox]::Show("Saisissez au moins 2 caracteres.", "Recherche", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
-            return
-        }
-        $lstResultats.Items.Clear()
-        $result = Search-AzUsers -SearchTerm $terme -MaxResults 15
-        if ($result.Success -and $result.Data) {
-            $script:SearchResults = @($result.Data)
-            foreach ($user in $script:SearchResults) {
-                $statut = if ($user.AccountEnabled) { "Actif" } else { "Desactive" }
-                $lstResultats.Items.Add("$($user.DisplayName) - $($user.UserPrincipalName) [$statut]") | Out-Null
-            }
-            $lstResultats.Visible = $true
-        }
-        else {
-            $lstResultats.Visible = $false
-            [System.Windows.Forms.MessageBox]::Show("Aucun utilisateur trouve.", "Recherche", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
-        }
-    })
-
-    $txtRecherche.Add_KeyDown({
-        if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Enter) {
-            $btnRecherche.PerformClick()
-            $_.SuppressKeyPress = $true
-        }
-    })
-
-    # Selection d'un utilisateur
-    $lstResultats.Add_SelectedIndexChanged({
-        if ($lstResultats.SelectedIndex -ge 0 -and $lstResultats.SelectedIndex -lt $script:SearchResults.Count) {
-            $selected = $script:SearchResults[$lstResultats.SelectedIndex]
-            $script:SelectedUserId = $selected.Id
-            $script:SelectedUserUPN = $selected.UserPrincipalName
-            $script:SelectedUserName = $selected.DisplayName
-            $lblUserInfo.Text = "Selectionne : $($selected.DisplayName) ($($selected.UserPrincipalName))"
-            $lblUserInfo.Visible = $true
-            $lstResultats.Visible = $false
-        }
-    })
-
-    # === Section Details du depart ===
-    $ySection2 = 240
+    # =================================================================
+    # SECTION : Détails du départ
+    # =================================================================
+    $ySection2 = 265
 
     $lblSection2 = New-Object System.Windows.Forms.Label
-    $lblSection2.Text = "Details du depart"
+    $lblSection2.Text = Get-Text "offboarding.section_details"
     $lblSection2.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
     $lblSection2.ForeColor = [System.Drawing.Color]::FromArgb(33, 37, 41)
     $lblSection2.Location = New-Object System.Drawing.Point(15, $ySection2)
-    $lblSection2.Size = New-Object System.Drawing.Size(560, 25)
+    $lblSection2.Size = New-Object System.Drawing.Size(600, 25)
     $form.Controls.Add($lblSection2)
     $ySection2 += 35
 
     # Date de depart
     $lblDate = New-Object System.Windows.Forms.Label
-    $lblDate.Text = "Date de depart :"
+    $lblDate.Text = Get-Text "offboarding.field_date"
     $lblDate.Font = New-Object System.Drawing.Font("Segoe UI", 9)
     $lblDate.Location = New-Object System.Drawing.Point(15, ($ySection2 + 3))
     $lblDate.Size = New-Object System.Drawing.Size(120, 20)
@@ -161,7 +146,7 @@ function Show-OffboardingForm {
 
     # Raison du depart
     $lblRaison = New-Object System.Windows.Forms.Label
-    $lblRaison.Text = "Raison :"
+    $lblRaison.Text = Get-Text "offboarding.field_reason"
     $lblRaison.Font = New-Object System.Drawing.Font("Segoe UI", 9)
     $lblRaison.Location = New-Object System.Drawing.Point(15, ($ySection2 + 3))
     $lblRaison.Size = New-Object System.Drawing.Size(120, 20)
@@ -172,140 +157,387 @@ function Show-OffboardingForm {
     $cboRaison.Size = New-Object System.Drawing.Size(200, 25)
     $cboRaison.Font = New-Object System.Drawing.Font("Segoe UI", 9)
     $cboRaison.DropDownStyle = "DropDownList"
-    @("Demission", "Licenciement", "Fin de contrat", "Autre") | ForEach-Object { $cboRaison.Items.Add($_) | Out-Null }
+    @(
+        (Get-Text "offboarding.reason_resignation"),
+        (Get-Text "offboarding.reason_termination"),
+        (Get-Text "offboarding.reason_contract_end"),
+        (Get-Text "offboarding.reason_other")
+    ) | ForEach-Object { $cboRaison.Items.Add($_) | Out-Null }
     $cboRaison.SelectedIndex = 0
     $form.Controls.Add($cboRaison)
     $ySection2 += 33
 
-    # Redirection de boite mail
-    $lblRedirection = New-Object System.Windows.Forms.Label
-    $lblRedirection.Text = "Rediriger mail vers :"
-    $lblRedirection.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-    $lblRedirection.Location = New-Object System.Drawing.Point(15, ($ySection2 + 3))
-    $lblRedirection.Size = New-Object System.Drawing.Size(130, 20)
-    $form.Controls.Add($lblRedirection)
+    # Déléguer accès à la boîte (Read & Manage / FullAccess)
+    $lblDelegate = New-Object System.Windows.Forms.Label
+    $lblDelegate.Text = Get-Text "offboarding.field_delegate_access"
+    $lblDelegate.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $lblDelegate.Location = New-Object System.Drawing.Point(15, ($ySection2 + 3))
+    $lblDelegate.Size = New-Object System.Drawing.Size(130, 20)
+    $form.Controls.Add($lblDelegate)
 
-    $txtRedirection = New-Object System.Windows.Forms.TextBox
-    $txtRedirection.Location = New-Object System.Drawing.Point(150, $ySection2)
-    $txtRedirection.Size = New-Object System.Drawing.Size(300, 25)
-    $txtRedirection.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-    $form.Controls.Add($txtRedirection)
-    $ySection2 += 40
+    $txtDelegate = New-Object System.Windows.Forms.TextBox
+    $txtDelegate.Location = New-Object System.Drawing.Point(150, $ySection2)
+    $txtDelegate.Size = New-Object System.Drawing.Size(300, 25)
+    $txtDelegate.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $form.Controls.Add($txtDelegate)
 
-    # === Cases a cocher des actions ===
+    $lblDelegateHint = New-Object System.Windows.Forms.Label
+    $lblDelegateHint.Text = Get-Text "offboarding.delegate_hint"
+    $lblDelegateHint.Font = New-Object System.Drawing.Font("Segoe UI", 8, [System.Drawing.FontStyle]::Italic)
+    $lblDelegateHint.ForeColor = [System.Drawing.Color]::Gray
+    $lblDelegateHint.Location = New-Object System.Drawing.Point(150, ($ySection2 + 27))
+    $lblDelegateHint.Size = New-Object System.Drawing.Size(400, 16)
+    $form.Controls.Add($lblDelegateHint)
+    $ySection2 += 48
+
+    # =================================================================
+    # SECTION : Actions d'offboarding (checkboxes)
+    # =================================================================
     $chkDesactiver = New-Object System.Windows.Forms.CheckBox
-    $chkDesactiver.Text = "Desactiver le compte"
+    $chkDesactiver.Text = Get-Text "offboarding.chk_disable"
     $chkDesactiver.Font = New-Object System.Drawing.Font("Segoe UI", 9)
     $chkDesactiver.Location = New-Object System.Drawing.Point(30, $ySection2)
-    $chkDesactiver.Size = New-Object System.Drawing.Size(250, 22)
+    $chkDesactiver.Size = New-Object System.Drawing.Size(270, 22)
     $chkDesactiver.Checked = $true
     $form.Controls.Add($chkDesactiver)
 
+    $chkRevoquerSessions = New-Object System.Windows.Forms.CheckBox
+    $chkRevoquerSessions.Text = Get-Text "offboarding.chk_revoke_sessions"
+    $chkRevoquerSessions.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $chkRevoquerSessions.Location = New-Object System.Drawing.Point(320, $ySection2)
+    $chkRevoquerSessions.Size = New-Object System.Drawing.Size(300, 22)
+    $chkRevoquerSessions.Checked = $true
+    $form.Controls.Add($chkRevoquerSessions)
+    $ySection2 += 28
+
+    $chkRetirerGroupes = New-Object System.Windows.Forms.CheckBox
+    $chkRetirerGroupes.Text = Get-Text "offboarding.chk_remove_groups"
+    $chkRetirerGroupes.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $chkRetirerGroupes.Location = New-Object System.Drawing.Point(30, $ySection2)
+    $chkRetirerGroupes.Size = New-Object System.Drawing.Size(270, 22)
+    $chkRetirerGroupes.Checked = $Config.offboarding.remove_all_groups
+    $form.Controls.Add($chkRetirerGroupes)
+
     $chkRevoquerLicences = New-Object System.Windows.Forms.CheckBox
-    $chkRevoquerLicences.Text = "Revoquer les licences"
+    $chkRevoquerLicences.Text = Get-Text "offboarding.chk_revoke_licenses"
     $chkRevoquerLicences.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-    $chkRevoquerLicences.Location = New-Object System.Drawing.Point(300, $ySection2)
-    $chkRevoquerLicences.Size = New-Object System.Drawing.Size(250, 22)
+    $chkRevoquerLicences.Location = New-Object System.Drawing.Point(320, $ySection2)
+    $chkRevoquerLicences.Size = New-Object System.Drawing.Size(300, 22)
     $chkRevoquerLicences.Checked = $Config.offboarding.revoke_licenses
     $form.Controls.Add($chkRevoquerLicences)
     $ySection2 += 28
 
-    $chkRetirerGroupes = New-Object System.Windows.Forms.CheckBox
-    $chkRetirerGroupes.Text = "Retirer tous les groupes"
-    $chkRetirerGroupes.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-    $chkRetirerGroupes.Location = New-Object System.Drawing.Point(30, $ySection2)
-    $chkRetirerGroupes.Size = New-Object System.Drawing.Size(250, 22)
-    $chkRetirerGroupes.Checked = $Config.offboarding.remove_all_groups
-    $form.Controls.Add($chkRetirerGroupes)
+    # Masquer du carnet d'adresses (GAL) — coché par défaut
+    $chkHideGAL = New-Object System.Windows.Forms.CheckBox
+    $chkHideGAL.Text = Get-Text "offboarding.chk_hide_gal"
+    $chkHideGAL.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $chkHideGAL.Location = New-Object System.Drawing.Point(30, $ySection2)
+    $chkHideGAL.Size = New-Object System.Drawing.Size(270, 22)
+    $chkHideGAL.Checked = $true
+    $form.Controls.Add($chkHideGAL)
 
-    $chkRevoquerSessions = New-Object System.Windows.Forms.CheckBox
-    $chkRevoquerSessions.Text = "Forcer deconnexion des sessions"
-    $chkRevoquerSessions.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-    $chkRevoquerSessions.Location = New-Object System.Drawing.Point(300, $ySection2)
-    $chkRevoquerSessions.Size = New-Object System.Drawing.Size(280, 22)
-    $chkRevoquerSessions.Checked = $true
-    $form.Controls.Add($chkRevoquerSessions)
+    # Convertir en boîte partagée — activé seulement après check Exchange, décoché par défaut
+    $chkConvertShared = New-Object System.Windows.Forms.CheckBox
+    $chkConvertShared.Text = Get-Text "offboarding.chk_convert_shared"
+    $chkConvertShared.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $chkConvertShared.Location = New-Object System.Drawing.Point(320, $ySection2)
+    $chkConvertShared.Size = New-Object System.Drawing.Size(300, 22)
+    $chkConvertShared.Checked = $false
+    $chkConvertShared.Enabled = $false
+    $form.Controls.Add($chkConvertShared)
     $ySection2 += 35
 
-    # Label de chargement
+    # =================================================================
+    # SECTION : Sélecteur de licence Exchange (visible si BAL > 50 Go)
+    # =================================================================
+    $lblLicWarning = New-Object System.Windows.Forms.Label
+    $lblLicWarning.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+    $lblLicWarning.ForeColor = [System.Drawing.Color]::FromArgb(220, 130, 0)
+    $lblLicWarning.Location = New-Object System.Drawing.Point(30, $ySection2)
+    $lblLicWarning.Size = New-Object System.Drawing.Size(600, 20)
+    $lblLicWarning.Visible = $false
+    $form.Controls.Add($lblLicWarning)
+
+    $clbLicenses = New-Object System.Windows.Forms.CheckedListBox
+    $clbLicenses.Location = New-Object System.Drawing.Point(30, ($ySection2 + 24))
+    $clbLicenses.Size = New-Object System.Drawing.Size(500, 60)
+    $clbLicenses.CheckOnClick = $true
+    $clbLicenses.Visible = $false
+    $form.Controls.Add($clbLicenses)
+
+    $btnRefreshLic = New-Object System.Windows.Forms.Button
+    $btnRefreshLic.Text = "⟳"
+    $btnRefreshLic.Location = New-Object System.Drawing.Point(538, ($ySection2 + 24))
+    $btnRefreshLic.Size = New-Object System.Drawing.Size(35, 25)
+    $btnRefreshLic.FlatStyle = "Flat"
+    $btnRefreshLic.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+    $btnRefreshLic.Visible = $false
+    $form.Controls.Add($btnRefreshLic)
+
+    $lblLicInfo = New-Object System.Windows.Forms.Label
+    $lblLicInfo.Font = New-Object System.Drawing.Font("Segoe UI", 8, [System.Drawing.FontStyle]::Italic)
+    $lblLicInfo.ForeColor = [System.Drawing.Color]::Gray
+    $lblLicInfo.Location = New-Object System.Drawing.Point(30, ($ySection2 + 86))
+    $lblLicInfo.Size = New-Object System.Drawing.Size(540, 16)
+    $lblLicInfo.Visible = $false
+    $form.Controls.Add($lblLicInfo)
+
+    # Fonction : charger les groupes de licence par préfixe (même pattern que onboarding)
+    function Update-OffboardLicenseList {
+        $clbLicenses.Items.Clear()
+        $script:LicenseGroupNames = @()
+        $prefix = if ($Config.PSObject.Properties["license_group_prefix"]) { $Config.license_group_prefix } else { "" }
+        if ([string]::IsNullOrWhiteSpace($prefix)) { return }
+
+        $res = Search-AzGroups -SearchTerm $prefix -MaxResults 50
+        if ($res.Success -and $res.Data) {
+            $filtered = $res.Data | Where-Object { $_.DisplayName -like "$prefix*" } | Sort-Object DisplayName
+            foreach ($grp in $filtered) {
+                $clbLicenses.Items.Add($grp.DisplayName, $false) | Out-Null
+                $script:LicenseGroupNames += $grp.DisplayName
+            }
+        }
+    }
+
+    $btnRefreshLic.Add_Click({ Update-OffboardLicenseList })
+
+    # Fonction : afficher/masquer le panneau licence selon conditions
+    function Update-LicensePanelVisibility {
+        $showPanel = ($chkConvertShared.Checked -and $script:MailboxSizeGB -gt 50)
+        $lblLicWarning.Visible = $showPanel
+        $clbLicenses.Visible = $showPanel
+        $btnRefreshLic.Visible = $showPanel
+        $lblLicInfo.Visible = $showPanel
+    }
+
+    $chkConvertShared.Add_CheckedChanged({ Update-LicensePanelVisibility })
+
+    # =================================================================
+    # Labels de chargement et erreur
+    # =================================================================
+    $yBottom = $ySection2 + 110
+
     $lblChargement = New-Object System.Windows.Forms.Label
-    $lblChargement.Text = "Traitement de l'offboarding en cours..."
+    $lblChargement.Text = Get-Text "offboarding.processing"
     $lblChargement.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Italic)
     $lblChargement.ForeColor = [System.Drawing.Color]::FromArgb(0, 123, 255)
-    $lblChargement.Location = New-Object System.Drawing.Point(15, $ySection2)
-    $lblChargement.Size = New-Object System.Drawing.Size(350, 20)
+    $lblChargement.Location = New-Object System.Drawing.Point(15, $yBottom)
+    $lblChargement.Size = New-Object System.Drawing.Size(400, 20)
     $lblChargement.Visible = $false
     $form.Controls.Add($lblChargement)
 
-    # Label d'erreur
     $lblErreur = New-Object System.Windows.Forms.Label
     $lblErreur.Font = New-Object System.Drawing.Font("Segoe UI", 8)
     $lblErreur.ForeColor = [System.Drawing.Color]::Red
-    $lblErreur.Location = New-Object System.Drawing.Point(15, ($ySection2 + 22))
-    $lblErreur.Size = New-Object System.Drawing.Size(560, 20)
+    $lblErreur.Location = New-Object System.Drawing.Point(15, ($yBottom + 22))
+    $lblErreur.Size = New-Object System.Drawing.Size(600, 20)
     $lblErreur.Visible = $false
     $form.Controls.Add($lblErreur)
 
-    # === Boutons ===
+    # =================================================================
+    # Boutons d'action
+    # =================================================================
     $btnExecuter = New-Object System.Windows.Forms.Button
-    $btnExecuter.Text = "Executer l'offboarding"
+    $btnExecuter.Text = Get-Text "offboarding.btn_execute"
     $btnExecuter.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-    $btnExecuter.Location = New-Object System.Drawing.Point(250, 530)
-    $btnExecuter.Size = New-Object System.Drawing.Size(190, 40)
+    $btnExecuter.Location = New-Object System.Drawing.Point(280, 670)
+    $btnExecuter.Size = New-Object System.Drawing.Size(210, 40)
     $btnExecuter.BackColor = [System.Drawing.Color]::FromArgb(220, 53, 69)
     $btnExecuter.ForeColor = [System.Drawing.Color]::White
     $btnExecuter.FlatStyle = "Flat"
     $form.Controls.Add($btnExecuter)
 
     $btnAnnuler = New-Object System.Windows.Forms.Button
-    $btnAnnuler.Text = "Annuler"
+    $btnAnnuler.Text = Get-Text "offboarding.btn_cancel"
     $btnAnnuler.Font = New-Object System.Drawing.Font("Segoe UI", 10)
-    $btnAnnuler.Location = New-Object System.Drawing.Point(450, 530)
-    $btnAnnuler.Size = New-Object System.Drawing.Size(140, 40)
+    $btnAnnuler.Location = New-Object System.Drawing.Point(500, 670)
+    $btnAnnuler.Size = New-Object System.Drawing.Size(130, 40)
     $btnAnnuler.FlatStyle = "Flat"
     $btnAnnuler.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     $form.Controls.Add($btnAnnuler)
 
     $form.CancelButton = $btnAnnuler
 
-    # === Action d'offboarding ===
+    # =================================================================
+    # ÉVÉNEMENT : Recherche d'utilisateur
+    # =================================================================
+    $btnRecherche.Add_Click({
+        $terme = $txtRecherche.Text.Trim()
+        if ($terme.Length -lt 2) {
+            [System.Windows.Forms.MessageBox]::Show(
+                (Get-Text "offboarding.search_min_chars"),
+                (Get-Text "offboarding.btn_search"),
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
+            return
+        }
+        $lstResultats.Items.Clear()
+        $result = Search-AzUsers -SearchTerm $terme -MaxResults 15
+        if ($result.Success -and $result.Data) {
+            $script:SearchResults = @($result.Data)
+            foreach ($user in $script:SearchResults) {
+                $statut = if ($user.AccountEnabled) { Get-Text "offboarding.status_active" } else { Get-Text "offboarding.status_disabled" }
+                $lstResultats.Items.Add("$($user.DisplayName) - $($user.UserPrincipalName) [$statut]") | Out-Null
+            }
+            $lstResultats.Visible = $true
+        }
+        else {
+            $lstResultats.Visible = $false
+            [System.Windows.Forms.MessageBox]::Show(
+                (Get-Text "offboarding.search_no_result"),
+                (Get-Text "offboarding.btn_search"),
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
+        }
+    })
+
+    $txtRecherche.Add_KeyDown({
+        if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Enter) {
+            $btnRecherche.PerformClick()
+            $_.SuppressKeyPress = $true
+        }
+    })
+
+    # =================================================================
+    # ÉVÉNEMENT : Sélection d'un utilisateur + vérification BAL
+    # =================================================================
+    $lstResultats.Add_SelectedIndexChanged({
+        if ($lstResultats.SelectedIndex -ge 0 -and $lstResultats.SelectedIndex -lt $script:SearchResults.Count) {
+            $selected = $script:SearchResults[$lstResultats.SelectedIndex]
+            $script:SelectedUserId = $selected.Id
+            $script:SelectedUserUPN = $selected.UserPrincipalName
+            $script:SelectedUserName = $selected.DisplayName
+            $lblUserInfo.Text = (Get-Text "offboarding.selected_user") -f $selected.DisplayName, $selected.UserPrincipalName
+            $lblUserInfo.Visible = $true
+            $lstResultats.Visible = $false
+
+            # Réinitialiser l'état BAL
+            $script:MailboxSizeGB = 0
+            $lblMailboxInfo.Visible = $false
+            $chkConvertShared.Enabled = $false
+            Update-LicensePanelVisibility
+
+            # Vérification de la taille de la BAL via Exchange Online
+            if ($script:ExchangeAvailable) {
+                $lblMailboxInfo.Text = Get-Text "offboarding.mailbox_checking"
+                $lblMailboxInfo.ForeColor = [System.Drawing.Color]::Gray
+                $lblMailboxInfo.Visible = $true
+                $form.Refresh()
+
+                $sizeResult = Get-AzMailboxSize -Identity $script:SelectedUserUPN
+
+                if ($sizeResult.Success) {
+                    $script:MailboxSizeGB = $sizeResult.SizeGB
+
+                    if ($sizeResult.SizeGB -gt 50) {
+                        # BAL > 50 Go — Warning orange
+                        $lblMailboxInfo.Text = (Get-Text "offboarding.mailbox_over_limit") -f $sizeResult.SizeGB
+                        $lblMailboxInfo.ForeColor = [System.Drawing.Color]::FromArgb(220, 130, 0)
+
+                        # Charger les groupes de licence et afficher le panneau
+                        Update-OffboardLicenseList
+                        $licPrefix = if ($Config.PSObject.Properties["license_group_prefix"]) { $Config.license_group_prefix } else { "" }
+                        if (-not [string]::IsNullOrWhiteSpace($licPrefix)) {
+                            $lblLicInfo.Text = (Get-Text "offboarding.license_prefix_info") -f $licPrefix
+                        }
+                        $lblLicWarning.Text = Get-Text "offboarding.mailbox_license_required"
+                    }
+                    else {
+                        # BAL <= 50 Go — OK vert
+                        $lblMailboxInfo.Text = (Get-Text "offboarding.mailbox_ok") -f $sizeResult.SizeGB
+                        $lblMailboxInfo.ForeColor = [System.Drawing.Color]::FromArgb(40, 167, 69)
+                    }
+
+                    $chkConvertShared.Enabled = $true
+                    $chkConvertShared.Checked = $false
+                }
+                else {
+                    # Erreur Exchange — BAL peut-être inexistante
+                    $lblMailboxInfo.Text = (Get-Text "offboarding.mailbox_error") -f $sizeResult.Error
+                    $lblMailboxInfo.ForeColor = [System.Drawing.Color]::FromArgb(220, 130, 0)
+                    $chkConvertShared.Enabled = $false
+                    $chkConvertShared.Checked = $false
+                }
+
+                $lblMailboxInfo.Visible = $true
+            }
+            else {
+                # Exchange Online non connecté
+                $lblMailboxInfo.Text = Get-Text "offboarding.exchange_unavailable"
+                $lblMailboxInfo.ForeColor = [System.Drawing.Color]::Gray
+                $lblMailboxInfo.Visible = $true
+                $chkConvertShared.Enabled = $false
+                $chkConvertShared.Checked = $false
+            }
+
+            Update-LicensePanelVisibility
+        }
+    })
+
+    # =================================================================
+    # ÉVÉNEMENT : Exécution de l'offboarding
+    # =================================================================
     $btnExecuter.Add_Click({
         $lblErreur.Visible = $false
 
         # Validation : utilisateur selectionne
         if ($null -eq $script:SelectedUserId) {
-            $lblErreur.Text = "Veuillez rechercher et selectionner un utilisateur."
+            $lblErreur.Text = Get-Text "offboarding.validation_no_user"
             $lblErreur.Visible = $true
             return
         }
 
-        # Verification qu'au moins une action est cochee
-        if (-not $chkDesactiver.Checked -and -not $chkRevoquerLicences.Checked -and -not $chkRetirerGroupes.Checked -and -not $chkRevoquerSessions.Checked) {
-            $lblErreur.Text = "Veuillez selectionner au moins une action."
+        # Vérification qu'au moins une action est cochée
+        $hasAction = $chkDesactiver.Checked -or $chkRevoquerLicences.Checked -or `
+                     $chkRetirerGroupes.Checked -or $chkRevoquerSessions.Checked -or `
+                     $chkHideGAL.Checked -or $chkConvertShared.Checked
+        if (-not $hasAction) {
+            $lblErreur.Text = Get-Text "offboarding.validation_no_action"
             $lblErreur.Visible = $true
             return
+        }
+
+        # Vérification : BAL > 50 Go + conversion cochée + aucune licence sélectionnée
+        if ($chkConvertShared.Checked -and $script:MailboxSizeGB -gt 50 -and $clbLicenses.CheckedItems.Count -eq 0) {
+            $confirmNoLic = Show-ConfirmDialog `
+                -Titre (Get-Text "offboarding.confirm_no_license_title") `
+                -Message (Get-Text "offboarding.confirm_no_license_msg") `
+                -Icon ([System.Windows.Forms.MessageBoxIcon]::Warning)
+            if (-not $confirmNoLic) { return }
         }
 
         # DOUBLE CONFIRMATION (securite offboarding)
-        $confirmMsg = "ATTENTION : Vous etes sur le point d'effectuer l'offboarding de :`n`n"
-        $confirmMsg += "Utilisateur : $($script:SelectedUserName)`n"
+        $confirmMsg = (Get-Text "offboarding.confirm_warning") + "`n`n"
+        $confirmMsg += (Get-Text "offboarding.confirm_user") + " : $($script:SelectedUserName)`n"
         $confirmMsg += "UPN : $($script:SelectedUserUPN)`n"
-        $confirmMsg += "Raison : $($cboRaison.SelectedItem)`n`n"
-        $confirmMsg += "Actions prevues :`n"
-        if ($chkDesactiver.Checked) { $confirmMsg += "  - Desactiver le compte`n" }
-        if ($chkRevoquerSessions.Checked) { $confirmMsg += "  - Revoquer les sessions actives`n" }
-        if ($chkRetirerGroupes.Checked) { $confirmMsg += "  - Retirer tous les groupes`n" }
-        if ($chkRevoquerLicences.Checked) { $confirmMsg += "  - Revoquer toutes les licences`n" }
-        $confirmMsg += "`nCette action est irreversible. Confirmer ?"
+        $confirmMsg += (Get-Text "offboarding.confirm_reason") + " : $($cboRaison.SelectedItem)`n`n"
+        $confirmMsg += (Get-Text "offboarding.confirm_actions") + " :`n"
+        if ($chkDesactiver.Checked)       { $confirmMsg += "  - " + (Get-Text "offboarding.chk_disable") + "`n" }
+        if ($chkRevoquerSessions.Checked) { $confirmMsg += "  - " + (Get-Text "offboarding.chk_revoke_sessions") + "`n" }
+        if ($chkRetirerGroupes.Checked)   { $confirmMsg += "  - " + (Get-Text "offboarding.chk_remove_groups") + "`n" }
+        if ($chkHideGAL.Checked)          { $confirmMsg += "  - " + (Get-Text "offboarding.chk_hide_gal") + "`n" }
+        if ($chkConvertShared.Checked)    { $confirmMsg += "  - " + (Get-Text "offboarding.chk_convert_shared") + "`n" }
+        if ($chkRevoquerLicences.Checked) { $confirmMsg += "  - " + (Get-Text "offboarding.chk_revoke_licenses") + "`n" }
+        $confirmMsg += "`n" + (Get-Text "offboarding.confirm_irreversible")
 
-        $confirm1 = Show-ConfirmDialog -Titre "Confirmation de l'offboarding" -Message $confirmMsg -Icon ([System.Windows.Forms.MessageBoxIcon]::Warning)
+        $confirm1 = Show-ConfirmDialog -Titre (Get-Text "offboarding.confirm_title") -Message $confirmMsg -Icon ([System.Windows.Forms.MessageBoxIcon]::Warning)
         if (-not $confirm1) { return }
 
         # Deuxieme confirmation
-        $confirm2 = Show-ConfirmDialog -Titre "SECONDE CONFIRMATION" -Message "Etes-vous ABSOLUMENT certain de vouloir proceder a l'offboarding de $($script:SelectedUserName) ?`n`nCette action ne peut pas etre annulee." -Icon ([System.Windows.Forms.MessageBoxIcon]::Exclamation)
+        $confirm2 = Show-ConfirmDialog `
+            -Titre (Get-Text "offboarding.confirm_title_2") `
+            -Message ((Get-Text "offboarding.confirm_final") -f $script:SelectedUserName) `
+            -Icon ([System.Windows.Forms.MessageBoxIcon]::Exclamation)
         if (-not $confirm2) { return }
 
-        # Execution
+        # =================================================================
+        # Exécution séquentielle des actions
+        # Ordre : Disable+JobTitle → Sessions → Groups(skip dynamic) →
+        #         Hide GAL → Convert Shared → Add License → Remove Licenses
+        #         → Add to disabled group → Notification
+        # =================================================================
         $btnExecuter.Enabled = $false
         $lblChargement.Visible = $true
         $form.Refresh()
@@ -316,50 +548,116 @@ function Show-OffboardingForm {
         $actionsReussies = @()
 
         try {
-            # 1. Desactivation du compte
+            # 1. Désactivation du compte + suffixe "- DISABLED" sur jobTitle
             if ($chkDesactiver.Checked) {
+                $lblChargement.Text = Get-Text "offboarding.step_disable"
+                $form.Refresh()
                 $result = Disable-AzUser -UserId $userId
-                if ($result.Success) { $actionsReussies += "Compte desactive" }
-                else { $erreurs += "Desactivation : $($result.Error)" }
+                if ($result.Success) {
+                    $actionsReussies += Get-Text "offboarding.result_disabled"
+                    if ($result.OriginalJobTitle) {
+                        $actionsReussies += (Get-Text "offboarding.result_jobtitle") -f $result.OriginalJobTitle
+                    }
+                }
+                else { $erreurs += (Get-Text "offboarding.error_disable") + " : $($result.Error)" }
             }
 
-            # 2. Revocation des sessions
+            # 2. Révocation des sessions
             if ($chkRevoquerSessions.Checked) {
+                $lblChargement.Text = Get-Text "offboarding.step_sessions"
+                $form.Refresh()
                 $result = Revoke-AzUserSessions -UserId $userId
-                if ($result.Success) { $actionsReussies += "Sessions revoquees" }
-                else { $erreurs += "Sessions : $($result.Error)" }
+                if ($result.Success) { $actionsReussies += Get-Text "offboarding.result_sessions" }
+                else { $erreurs += (Get-Text "offboarding.error_sessions") + " : $($result.Error)" }
             }
 
-            # 3. Retrait des groupes
+            # 3. Retrait des groupes (skip dynamiques)
             if ($chkRetirerGroupes.Checked) {
+                $lblChargement.Text = Get-Text "offboarding.step_groups"
+                $form.Refresh()
                 $result = Remove-AzUserGroups -UserId $userId
-                if ($result.Success) { $actionsReussies += "Retire de $($result.RemovedCount) groupe(s)" }
-                else { $erreurs += "Groupes : $($result.Error)" }
+                if ($result.Success) {
+                    $msg = (Get-Text "offboarding.result_groups") -f $result.RemovedCount
+                    if ($result.SkippedDynamic -gt 0) {
+                        $msg += " " + ((Get-Text "offboarding.result_groups_dynamic") -f $result.SkippedDynamic)
+                    }
+                    $actionsReussies += $msg
+                }
+                else { $erreurs += (Get-Text "offboarding.error_groups") + " : $($result.Error)" }
             }
 
-            # 4. Revocation des licences
+            # 4. Masquer du carnet d'adresses (GAL)
+            if ($chkHideGAL.Checked) {
+                $lblChargement.Text = Get-Text "offboarding.step_hide_gal"
+                $form.Refresh()
+                $result = Hide-AzMailboxFromGAL -Identity $upn -UserId $userId
+                if ($result.Success) { $actionsReussies += (Get-Text "offboarding.result_hide_gal") + " ($($result.Method))" }
+                else { $erreurs += (Get-Text "offboarding.error_hide_gal") + " : $($result.Error)" }
+            }
+
+            # 5. Conversion en boîte partagée (AVANT révocation licences)
+            if ($chkConvertShared.Checked) {
+                $lblChargement.Text = Get-Text "offboarding.step_convert"
+                $form.Refresh()
+                $result = Convert-AzMailboxToShared -Identity $upn
+                if ($result.Success) { $actionsReussies += Get-Text "offboarding.result_convert" }
+                else { $erreurs += (Get-Text "offboarding.error_convert") + " : $($result.Error)" }
+            }
+
+            # 5b. Ajout de licence Exchange si BAL > 50 Go + licence sélectionnée
+            if ($chkConvertShared.Checked -and $clbLicenses.CheckedItems.Count -gt 0) {
+                $lblChargement.Text = Get-Text "offboarding.step_add_license"
+                $form.Refresh()
+                foreach ($licGrp in $clbLicenses.CheckedItems) {
+                    $licResult = Add-AzUserToGroup -UserId $userId -GroupName $licGrp
+                    if ($licResult.Success) { $actionsReussies += (Get-Text "offboarding.result_add_license") -f $licGrp }
+                    else { $erreurs += (Get-Text "offboarding.error_add_license") -f $licGrp, $licResult.Error }
+                }
+            }
+
+            # 5c. Délégation FullAccess (Read & Manage) sur la boîte
+            $delegateUpn = $txtDelegate.Text.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($delegateUpn)) {
+                $lblChargement.Text = Get-Text "offboarding.step_delegate"
+                $form.Refresh()
+                $result = Grant-AzMailboxFullAccess -MailboxIdentity $upn -DelegateUPN $delegateUpn
+                if ($result.Success) { $actionsReussies += (Get-Text "offboarding.result_delegate") -f $delegateUpn }
+                else { $erreurs += (Get-Text "offboarding.error_delegate") -f $delegateUpn, $result.Error }
+            }
+
+            # 6. Révocation des licences (les héritées de groupes sont ignorées)
             if ($chkRevoquerLicences.Checked) {
+                $lblChargement.Text = Get-Text "offboarding.step_licenses"
+                $form.Refresh()
                 $result = Remove-AzUserLicenses -UserId $userId
-                if ($result.Success) { $actionsReussies += "$($result.RemovedCount) licence(s) revoquee(s)" }
-                else { $erreurs += "Licences : $($result.Error)" }
+                if ($result.Success) {
+                    $msg = (Get-Text "offboarding.result_licenses") -f $result.RemovedCount
+                    if ($result.SkippedInherited -gt 0) {
+                        $msg += " " + ((Get-Text "offboarding.result_licenses_inherited") -f $result.SkippedInherited)
+                    }
+                    $actionsReussies += $msg
+                }
+                else { $erreurs += (Get-Text "offboarding.error_licenses") + " : $($result.Error)" }
             }
 
-            # 5. Ajout au groupe des comptes desactives
+            # 7. Ajout au groupe des comptes désactivés
             if ($chkDesactiver.Checked -and -not [string]::IsNullOrWhiteSpace($Config.offboarding.disabled_ou_group)) {
+                $lblChargement.Text = Get-Text "offboarding.step_disabled_group"
+                $form.Refresh()
                 $grpResult = Add-AzUserToGroup -UserId $userId -GroupName $Config.offboarding.disabled_ou_group
-                if ($grpResult.Success) { $actionsReussies += "Ajoute au groupe '$($Config.offboarding.disabled_ou_group)'" }
-                else { $erreurs += "Groupe desactives : $($grpResult.Error)" }
+                if ($grpResult.Success) { $actionsReussies += (Get-Text "offboarding.result_disabled_group") -f $Config.offboarding.disabled_ou_group }
+                else { $erreurs += (Get-Text "offboarding.error_disabled_group") + " : $($grpResult.Error)" }
             }
 
-            # 6. Notification
+            # 8. Notification
             if ($Config.notifications.enabled) {
                 $sujet = "Offboarding - $($script:SelectedUserName) ($upn)"
-                $corps = "<h2>Offboarding effectue</h2>"
-                $corps += "<p><strong>Employe :</strong> $($script:SelectedUserName)</p>"
+                $corps = "<h2>Offboarding effectué</h2>"
+                $corps += "<p><strong>Employé :</strong> $($script:SelectedUserName)</p>"
                 $corps += "<p><strong>UPN :</strong> $upn</p>"
                 $corps += "<p><strong>Raison :</strong> $($cboRaison.SelectedItem)</p>"
-                $corps += "<p><strong>Date de depart :</strong> $($dtpDepart.Value.ToString('yyyy-MM-dd'))</p>"
-                $corps += "<p><strong>Actions effectuees :</strong></p><ul>"
+                $corps += "<p><strong>Date de départ :</strong> $($dtpDepart.Value.ToString('yyyy-MM-dd'))</p>"
+                $corps += "<p><strong>Actions effectuées :</strong></p><ul>"
                 foreach ($action in $actionsReussies) { $corps += "<li>$action</li>" }
                 $corps += "</ul>"
                 if ($erreurs.Count -gt 0) {
@@ -370,19 +668,19 @@ function Show-OffboardingForm {
                 Send-Notification -Sujet $sujet -Corps $corps
             }
 
-            # 7. Resultat
+            # 9. Résultat
             $lblChargement.Visible = $false
 
-            $recapMsg = "Offboarding de $($script:SelectedUserName) termine.`n`n"
-            $recapMsg += "Actions reussies :`n" + ($actionsReussies -join "`n") + "`n"
+            $recapMsg = ((Get-Text "offboarding.result_summary") -f $script:SelectedUserName) + "`n`n"
+            $recapMsg += (Get-Text "offboarding.result_success_label") + " :`n" + ($actionsReussies -join "`n") + "`n"
             if ($erreurs.Count -gt 0) {
-                $recapMsg += "`nErreurs :`n" + ($erreurs -join "`n")
+                $recapMsg += "`n" + (Get-Text "offboarding.result_error_label") + " :`n" + ($erreurs -join "`n")
             }
 
             $isSuccess = ($erreurs.Count -eq 0)
-            Show-ResultDialog -Titre "Resultat de l'offboarding" -Message $recapMsg -IsSuccess $isSuccess
+            Show-ResultDialog -Titre (Get-Text "offboarding.result_title") -Message $recapMsg -IsSuccess $isSuccess
 
-            Write-Log -Level $(if ($isSuccess) { "SUCCESS" } else { "WARNING" }) -Action "OFFBOARDING" -UPN $upn -Message "Offboarding termine. Reussites: $($actionsReussies.Count), Erreurs: $($erreurs.Count)"
+            Write-Log -Level $(if ($isSuccess) { "SUCCESS" } else { "WARNING" }) -Action "OFFBOARDING" -UPN $upn -Message "Offboarding terminé. Réussites: $($actionsReussies.Count), Erreurs: $($erreurs.Count)"
 
             $form.Close()
         }
@@ -391,7 +689,7 @@ function Show-OffboardingForm {
             $btnExecuter.Enabled = $true
             $errMsg = $_.Exception.Message
             Write-Log -Level "ERROR" -Action "OFFBOARDING" -UPN $upn -Message "Erreur offboarding : $errMsg"
-            Show-ResultDialog -Titre "Erreur d'offboarding" -Message "Une erreur est survenue :`n`n$errMsg" -IsSuccess $false
+            Show-ResultDialog -Titre (Get-Text "offboarding.result_error_title") -Message ((Get-Text "offboarding.result_error_msg") -f $errMsg) -IsSuccess $false
         }
     })
 
@@ -401,7 +699,11 @@ function Show-OffboardingForm {
 
 # Point d'attention :
 # - DOUBLE CONFIRMATION obligatoire avant toute action d'offboarding
-# - Les cases a cocher sont pre-cochees selon la configuration du client
-# - L'ajout au groupe "Comptes-Desactives" est automatique si configure
-# - La redirection de boite mail est preparee dans le formulaire mais
-#   necessite l'API Exchange Online (non implementee ici — CHOIX: a completer)
+# - Les cases à cocher sont pré-cochées selon la configuration du client
+# - L'ajout au groupe "Comptes-Désactivés" est automatique si configuré
+# - Le suffixe "- DISABLED" est ajouté au jobTitle pour déclencher l'exclusion
+#   des groupes dynamiques (règle: user.jobTitle -notContains "- DISABLED")
+# - Les groupes dynamiques sont automatiquement ignorés lors du retrait
+# - La conversion en boîte partagée se fait AVANT la révocation des licences
+# - Si la BAL dépasse 50 Go, un sélecteur de licence Exchange est affiché
+# - Le masquage du GAL utilise Exchange Online avec fallback Graph API
