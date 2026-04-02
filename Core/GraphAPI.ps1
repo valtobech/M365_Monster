@@ -16,34 +16,6 @@
     [Équipe IT — GestionRH-AzureAD]
 #>
 
-function Get-AzUser {
-    <#
-    .SYNOPSIS
-        Récupère un utilisateur Azure AD par son ID ou UPN.
-
-    .PARAMETER UserId
-        ID ou UserPrincipalName de l'utilisateur.
-
-    .OUTPUTS
-        [PSCustomObject] — {Success: bool, Data: object, Error: string}
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$UserId
-    )
-
-    try {
-        Write-Log -Level "INFO" -Action "GET_USER" -UPN $UserId -Message "Récupération de l'utilisateur."
-        $user = Get-MgUser -UserId $UserId -Property "id,displayName,userPrincipalName,accountEnabled,department,jobTitle,mobilePhone,mail,employeeType,assignedLicenses" -ErrorAction Stop
-        return [PSCustomObject]@{ Success = $true; Data = $user; Error = $null }
-    }
-    catch {
-        $errMsg = $_.Exception.Message
-        Write-Log -Level "ERROR" -Action "GET_USER" -UPN $UserId -Message "Erreur : $errMsg"
-        return [PSCustomObject]@{ Success = $false; Data = $null; Error = $errMsg }
-    }
-}
 
 function Search-AzUsers {
     <#
@@ -347,9 +319,8 @@ function Add-AzUserToGroup {
         }
 
         # CHOIX: Si plusieurs groupes portent le même nom, on prend le premier
+        if ($group -is [array]) { $group = $group[0] }
         $groupId = $group.Id
-        if ($groupId -is [array]) { $groupId = $groupId[0] }
-        if ($group -is [array]) { $groupId = $group[0].Id }
 
         $bodyParam = @{
             "@odata.id" = "https://graph.microsoft.com/v1.0/directoryObjects/$UserId"
@@ -450,61 +421,6 @@ function Remove-AzUserGroups {
     }
 }
 
-function Set-AzUserLicense {
-    <#
-    .SYNOPSIS
-        Assigne une licence à un utilisateur Azure AD.
-
-    .PARAMETER UserId
-        ID de l'utilisateur.
-
-    .PARAMETER SkuId
-        SKU de la licence à assigner (format : TenantName:SKUPARTNAME).
-
-    .OUTPUTS
-        [PSCustomObject] — {Success: bool, Error: string}
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$UserId,
-
-        [Parameter(Mandatory = $true)]
-        [string]$SkuId
-    )
-
-    try {
-        Write-Log -Level "INFO" -Action "ASSIGN_LICENSE" -UPN $UserId -Message "Attribution de la licence '$SkuId'."
-
-        # Récupération du SKU ID réel depuis le nom
-        $skuPartName = $SkuId.Split(':')[-1]
-        $subscribedSkus = Get-MgSubscribedSku -ErrorAction Stop
-        $sku = $subscribedSkus | Where-Object { $_.SkuPartNumber -eq $skuPartName }
-
-        if ($null -eq $sku) {
-            throw "SKU '$skuPartName' introuvable dans le tenant. Licences disponibles : $(($subscribedSkus | ForEach-Object { $_.SkuPartNumber }) -join ', ')"
-        }
-
-        $params = @{
-            AddLicenses    = @(
-                @{
-                    SkuId = $sku.SkuId
-                }
-            )
-            RemoveLicenses = @()
-        }
-
-        Set-MgUserLicense -UserId $UserId -BodyParameter $params -ErrorAction Stop
-
-        Write-Log -Level "SUCCESS" -Action "ASSIGN_LICENSE" -UPN $UserId -Message "Licence '$SkuId' attribuée."
-        return [PSCustomObject]@{ Success = $true; Error = $null }
-    }
-    catch {
-        $errMsg = $_.Exception.Message
-        Write-Log -Level "ERROR" -Action "ASSIGN_LICENSE" -UPN $UserId -Message "Erreur licence : $errMsg"
-        return [PSCustomObject]@{ Success = $false; Error = $errMsg }
-    }
-}
 
 function Remove-AzUserLicenses {
     <#
@@ -756,11 +672,6 @@ function Get-AzUserManager {
     }
 }
 
-# Point d'attention :
-# - Chaque fonction retourne TOUJOURS un PSCustomObject avec au minimum Success et Error
-# - Les mots de passe ne sont JAMAIS inclus dans les logs
-# - Les erreurs "déjà membre" lors d'ajout à un groupe sont traitées comme des succès
-
 function Test-AzUserExists {
     <#
     .SYNOPSIS
@@ -819,9 +730,7 @@ function Get-AzDistinctValues {
         # Certaines propriétés (employeeType, usageLocation) ne supportent pas $filter dans Graph.
         # On récupère les utilisateurs avec la propriété demandée, sans filtre serveur.
         # Le filtrage des valeurs non-vides se fait côté client.
-        $propertiesFilter = @("department", "jobTitle")
-
-        if ($Property -in $propertiesFilter) {
+        if ($Property -in @("department", "jobTitle")) {
             # Ces propriétés supportent le $filter côté serveur
             $filter = "$Property ne null"
             $users = Get-MgUser -Filter $filter -Top $MaxUsers -Property $Property -ConsistencyLevel "eventual" -CountVariable countVar -ErrorAction Stop
@@ -832,14 +741,10 @@ function Get-AzDistinctValues {
         }
 
         # Extraire les valeurs distinctes et trier
-        $values = @()
-        foreach ($user in $users) {
-            $val = $user.$Property
-            if (-not [string]::IsNullOrWhiteSpace($val) -and $val -notin $values) {
-                $values += $val
-            }
-        }
-        $values = $values | Sort-Object
+        $values = $users |
+            ForEach-Object { $_.$Property } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Sort-Object -Unique
 
         Write-Log -Level "INFO" -Action "GET_DISTINCT" -Message "'$Property' : $($values.Count) valeur(s) distincte(s) trouvée(s)."
         return [PSCustomObject]@{ Success = $true; Data = $values; Error = $null }
@@ -904,57 +809,6 @@ function Search-AzGroups {
         $errMsg = $_.Exception.Message
         Write-Log -Level "ERROR" -Action "SEARCH_GROUPS" -Message "Erreur recherche groupes '$SearchTerm' : $errMsg"
         return [PSCustomObject]@{ Success = $false; Data = @(); Error = $errMsg }
-    }
-}
-
-function Remove-AzUserFromGroup {
-    <#
-    .SYNOPSIS
-        Retire un utilisateur d'un groupe Entra ID spécifique (par ID de groupe).
-        Complément à Add-AzUserToGroup pour la gestion fine des profils d'accès.
-
-    .PARAMETER UserId
-        ID Entra de l'utilisateur.
-
-    .PARAMETER GroupId
-        ID du groupe Entra ID.
-
-    .PARAMETER GroupName
-        Nom du groupe (pour le logging uniquement).
-
-    .OUTPUTS
-        [PSCustomObject] — {Success: bool, Error: string}
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$UserId,
-
-        [Parameter(Mandatory = $true)]
-        [string]$GroupId,
-
-        [string]$GroupName = ""
-    )
-
-    $label = if ($GroupName) { "'$GroupName' ($GroupId)" } else { $GroupId }
-
-    try {
-        Write-Log -Level "INFO" -Action "REMOVE_FROM_GROUP" -UPN $UserId -Message "Retrait du groupe $label."
-
-        Remove-MgGroupMemberByRef -GroupId $GroupId -DirectoryObjectId $UserId -ErrorAction Stop
-
-        Write-Log -Level "SUCCESS" -Action "REMOVE_FROM_GROUP" -UPN $UserId -Message "Retiré du groupe $label."
-        return [PSCustomObject]@{ Success = $true; Error = $null }
-    }
-    catch {
-        $errMsg = $_.Exception.Message
-        # "Not a member" ou "does not exist" = déjà retiré
-        if ($errMsg -like "*not found*" -or $errMsg -like "*does not exist*") {
-            Write-Log -Level "WARNING" -Action "REMOVE_FROM_GROUP" -UPN $UserId -Message "Déjà absent du groupe $label — ignoré."
-            return [PSCustomObject]@{ Success = $true; Error = $null }
-        }
-        Write-Log -Level "ERROR" -Action "REMOVE_FROM_GROUP" -UPN $UserId -Message "Erreur retrait groupe $label : $errMsg"
-        return [PSCustomObject]@{ Success = $false; Error = $errMsg }
     }
 }
 
@@ -1159,3 +1013,8 @@ function Grant-AzMailboxFullAccess {
         return [PSCustomObject]@{ Success = $false; Error = $errMsg }
     }
 }
+
+# Point d'attention :
+# - Chaque fonction retourne TOUJOURS un PSCustomObject avec au minimum Success et Error
+# - Les mots de passe ne sont JAMAIS inclus dans les logs
+# - Les erreurs "déjà membre" lors d'ajout à un groupe sont traitées comme des succès

@@ -6,6 +6,52 @@ Versioning selon [Semantic Versioning](https://semver.org/lang/fr/).
 
 ---
 
+## [0.2.0] — 2026-04-01
+
+### Revue et optimisation — Couche Core (`Core/`)
+
+**Suppression du code mort**
+
+- `Core/Functions.ps1` : suppression de `Get-MailNickname` (jamais appelée — `New-UsernameVariants` retourne déjà `MailNickname` directement) et de `Test-GraphConnection` (définie mais non appelée).
+- `Core/GraphAPI.ps1` : suppression de `Get-AzUser`, `Set-AzUserLicense` et `Remove-AzUserFromGroup` (aucun call site détecté dans l'ensemble du projet).
+- `Modules/GUI_Onboarding.ps1` : référence à `Get-MailNickname` retirée du commentaire `.DEPENDANCES`.
+
+**Corrections de bugs**
+
+- `Core/Functions.ps1` : reformatage de l'appel dense `[System.Windows.Forms.MessageBox]::Show(...)` dans `Show-PasswordDialog` (espaces parasites, lecture difficile).
+- `Core/Config.ps1` : correction du pattern `$allMatch` dans `Invoke-ConfigMigration` — remplacé `ForEach-Object { ... } -notcontains $false` par `Where-Object { -not ... }` avec early-exit. Unification de la notation de validation vers `PSObject.Properties[$champ]` (cohérence interne).
+- `Core/Lang.ps1` : correction d'un double `Dispose()` dans `Show-LanguageSelector` (déclenchable si la dialog retourne `OK` mais qu'aucun radio button n'est coché — `ObjectDisposedException`).
+
+**Correction critique — `Modules/GUI_Modification.ps1`**
+
+- `Show-ResetPassword` appelait `Show-PasswordDialog` avec le paramètre `-Password` (inexistant). Le nom correct est `-InitialToken` (signature dans `Core/Functions.ps1`, usage vérifié dans `GUI_Onboarding.ps1`). La liaison stricte de `[CmdletBinding()]` provoquait une erreur silencieuse à l'exécution.
+
+**Performance**
+
+- `Core/GraphAPI.ps1` — `Get-AzDistinctValues` : suppression du pattern O(n²) (`$arr += ... -notin $values` en boucle) remplacé par un pipeline `ForEach-Object | Where-Object | Sort-Object -Unique`.
+- `Core/GraphAPI.ps1` — `Add-AzUserToGroup` : correction d'une double vérification incohérente du type array (`if ($groupId -is [array])` puis `if ($group -is [array])` redondants sur la même valeur). Unifié en une seule normalisation avant l'accès à `.Id`.
+
+**Conformité patterns**
+
+- `Core/Lang.ps1` : ajout de `[CmdletBinding()]` sur les 6 fonctions du module (manquant, incohérent avec le reste du projet). Remplacement de la triple interpolation `"$($lang.Name)"` par l'accès direct `$lang.Name`. Remplacement du bloc BOM stripping conditionnel (3 lignes) par `.TrimStart([char]0xFEFF)` dans `Get-AvailableLanguages` et `Initialize-Language`.
+- `Core/GraphAPI.ps1` : déplacement du bloc `# Point d'attention` depuis le milieu du fichier vers la fin. Inlining de la variable intermédiaire `$propertiesFilter` dans `Get-AzDistinctValues`.
+- `Core/Functions.ps1` : correction d'indentation dans `Get-AccessProfiles` (accolade fermante à la colonne 0) et `Get-UserActiveProfiles` (4 espaces parasites sur le bloc `if`). Retrait d'un bloc commentaire de développement obsolète.
+
+### Corrigé — `Modules/GUI_Modification.ps1`
+
+- **Code mort** — `Show-ManageLicenses` : le bloc `$cfgGrp` cherchait `license_groups` dans la config — clé systématiquement supprimée par `Invoke-ConfigMigration` au chargement. Suppression du `$cfgGrp = @()`, du check `PSObject.Properties["license_groups"]` et du `foreach ($g in $cfgGrp)` (jamais exécuté). Simplification de la condition `$n -notin $cfgGrp -and $n -like "LIC-*"` → `$n -like "LIC-*"`.
+- **Refactoring** — `Invoke-RevokeSession` : appel `Invoke-MgGraphRequest POST .../revokeSignInSessions` inline remplacé par le wrapper `Revoke-AzUserSessions` de `GraphAPI.ps1` avec pattern `{Success, Error}` standard.
+- **i18n** — `Show-ManageGroups` : chaîne hardcodée `"Erreur : $($_.Exception.Message)"` remplacée par `Get-Text "modification.groups_search_error" $_.Exception.Message`.
+- **i18n** — `Show-ChangeAccessProfile` : message hardcodé `"Aucun profil d'accès configuré pour ce client."` remplacé par `Get-Text "modification.profile_not_configured"`.
+
+### Ajouté — Fichiers de langue (`fr.json`, `en.json`)
+
+- 2 nouvelles clés dans la section `modification` :
+  - `profile_not_configured` : message affiché quand `access_profiles` est absent de la config client.
+  - `groups_search_error` : message d'erreur de recherche de groupes avec placeholder `{0}`.
+
+---
+
 ## [0.1.10] — 2026-03-24
 
 ### Refonte — Module Offboarding (`GUI_Offboarding.ps1`)

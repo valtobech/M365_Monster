@@ -1,6 +1,6 @@
 {
-  "version": "0.1.10",
-  "release_date": "2026-03-24",
+  "version": "0.2.0",
+  "release_date": "2026-04-01",
   "minimum_ps_version": "7.0",
-  "release_notes": "Refonte offboarding : groupes dynamiques ignorés, conversion SharedMailbox, masquage GAL, délégation FullAccess, renommage jobTitle DISABLE. Onboarding : Office Location, Company Name, Hire Date."
+  "release_notes": "Revue et optimisation de la couche Core : suppression du code mort, correction d'un bug critique dans GUI_Modification (paramètre -InitialToken), performances Graph, conformité i18n."
 }

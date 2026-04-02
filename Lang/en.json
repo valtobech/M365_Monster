@@ -401,7 +401,9 @@
     "profile_apply_confirm": "Confirm profile change?\n\n{0}",
     "profile_apply_success": "Profiles updated successfully.\n+{0} added, -{1} removed, {2} preserved.",
     "profile_apply_partial": "Change applied with {0} error(s):\n{1}",
-    "profile_no_change": "No change detected between current and target profiles."
+    "profile_no_change": "No change detected between current and target profiles.",
+    "profile_not_configured": "No access profiles configured for this client.",
+    "groups_search_error": "Error: {0}"
   },
   "shared_mailbox_audit": {
     "title": "M365 Monster — Shared Mailbox Audit",

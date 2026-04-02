@@ -29,6 +29,7 @@ function Get-AvailableLanguages {
     .OUTPUTS
         [Array] — Objets {Code, Name, FilePath}
     #>
+    [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
         [string]$RootPath
@@ -41,11 +42,7 @@ function Get-AvailableLanguages {
     Get-ChildItem -Path $langFolder -Filter "*.json" | ForEach-Object {
         try {
             # Essai 1 : UTF8 explicite
-            $raw = Get-Content -Path $_.FullName -Raw -Encoding UTF8
-            # Nettoyer le BOM s'il est présent en tant que caractère
-            if ($raw.Length -gt 0 -and [int]$raw[0] -eq 65279) {
-                $raw = $raw.Substring(1)
-            }
+            $raw = (Get-Content -Path $_.FullName -Raw -Encoding UTF8).TrimStart([char]0xFEFF)
             $content = $raw | ConvertFrom-Json
             if ($content._code -and $content._language) {
                 $languages += [PSCustomObject]@{
@@ -83,6 +80,7 @@ function Get-SavedLanguage {
     .OUTPUTS
         [string] — Code langue (ex: "fr", "en") ou $null si pas encore choisi.
     #>
+    [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
         [string]$RootPath
@@ -107,6 +105,7 @@ function Save-LanguageChoice {
     .SYNOPSIS
         Sauvegarde le code langue dans settings.json.
     #>
+    [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
         [string]$RootPath,
@@ -151,6 +150,7 @@ function Show-LanguageSelector {
     .OUTPUTS
         [string] — Code langue sélectionné, ou $null si annulé.
     #>
+    [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
         [string]$RootPath
@@ -191,7 +191,7 @@ function Show-LanguageSelector {
 
     foreach ($lang in $languages) {
         $radio = New-Object System.Windows.Forms.RadioButton
-        $radio.Text = "$($lang.Name)"
+        $radio.Text = $lang.Name
         $radio.Font = New-Object System.Drawing.Font("Segoe UI", 12)
         $radio.Location = New-Object System.Drawing.Point(100, $yPos)
         $radio.Size = New-Object System.Drawing.Size(220, 30)
@@ -225,14 +225,12 @@ function Show-LanguageSelector {
     $form.ClientSize = New-Object System.Drawing.Size(400, $formHeight)
 
     $result = $form.ShowDialog()
-
-    if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
-        $selected = $radioButtons | Where-Object { $_.Checked } | Select-Object -First 1
-        $form.Dispose()
-        if ($selected) { return $selected.Tag }
+    $selected = if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+        $radioButtons | Where-Object { $_.Checked } | Select-Object -First 1
     }
-
     $form.Dispose()
+
+    if ($selected) { return $selected.Tag }
     return $null
 }
 
@@ -250,6 +248,7 @@ function Initialize-Language {
     .OUTPUTS
         [bool] — $true si initialisé avec succès, $false si annulé.
     #>
+    [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
         [string]$RootPath,
@@ -294,11 +293,7 @@ function Initialize-Language {
     }
 
     try {
-        $raw = Get-Content -Path $langFile -Raw -Encoding UTF8
-        # Nettoyer le BOM si present (caractere Unicode U+FEFF)
-        if ($raw.Length -gt 0 -and [int]$raw[0] -eq 65279) {
-            $raw = $raw.Substring(1)
-        }
+        $raw = (Get-Content -Path $langFile -Raw -Encoding UTF8).TrimStart([char]0xFEFF)
         $global:M365Strings = $raw | ConvertFrom-Json
         $global:M365CurrentLang = $langCode
         return $true
@@ -327,6 +322,7 @@ function Get-Text {
     .OUTPUTS
         [string] — La chaîne traduite, ou la clé elle-même si non trouvée.
     #>
+    [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
         [string]$Key,

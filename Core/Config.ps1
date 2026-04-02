@@ -53,8 +53,8 @@ function Invoke-ConfigMigration {
                 $parts = $firstGroup.Split($sep)
                 if ($parts.Count -ge 2) {
                     $candidate = "$($parts[0])$sep"
-                    $allMatch = $existingGroups | ForEach-Object { $_.StartsWith($candidate) }
-                    if ($allMatch -notcontains $false) {
+                    $allMatch = -not ($existingGroups | Where-Object { -not $_.StartsWith($candidate) })
+                    if ($allMatch) {
                         $prefix = $candidate
                         break
                     }
@@ -138,7 +138,7 @@ function Load-ClientConfig {
     )
 
     foreach ($champ in $champsObligatoires) {
-        if (-not ($configObject.PSObject.Properties.Name -contains $champ)) {
+        if (-not $configObject.PSObject.Properties[$champ]) {
             throw "Champ obligatoire manquant dans la configuration : '$champ'"
         }
     }
@@ -166,7 +166,7 @@ function Load-ClientConfig {
     # Validation offboarding
     $offboardingChamps = @('disabled_ou_group', 'revoke_licenses', 'remove_all_groups', 'retention_days')
     foreach ($champ in $offboardingChamps) {
-        if (-not ($configObject.offboarding.PSObject.Properties.Name -contains $champ)) {
+        if (-not $configObject.offboarding.PSObject.Properties[$champ]) {
             throw "Champ obligatoire manquant dans offboarding : '$champ'"
         }
     }

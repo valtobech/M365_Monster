@@ -401,7 +401,9 @@
     "profile_apply_confirm": "Confirmez-vous le changement de profil ?\n\n{0}",
     "profile_apply_success": "Profils mis à jour avec succès.\n+{0} ajouté(s), -{1} retiré(s), {2} conservé(s).",
     "profile_apply_partial": "Changement appliqué avec {0} erreur(s) :\n{1}",
-    "profile_no_change": "Aucun changement détecté entre les profils actuels et cibles."
+    "profile_no_change": "Aucun changement détecté entre les profils actuels et cibles.",
+    "profile_not_configured": "Aucun profil d'accès configuré pour ce client.",
+    "groups_search_error": "Erreur : {0}"
   },
   "shared_mailbox_audit": {
     "title": "M365 Monster — Audit des boîtes aux lettres partagées",

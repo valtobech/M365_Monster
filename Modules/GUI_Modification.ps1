@@ -10,7 +10,7 @@
 .DEPENDANCES
     - Core/Functions.ps1  (Write-Log, Show-ConfirmDialog, Show-ResultDialog,
                            New-SecurePassword, Show-PasswordDialog)
-    - Core/GraphAPI.ps1   (Search-AzUsers, Get-AzUser, Set-AzUser,
+    - Core/GraphAPI.ps1   (Search-AzUsers, Set-AzUser,
                            Set-AzUserManager, Reset-AzUserPassword,
                            Disable-AzUser, Enable-AzUser,
                            Get-AzUserManager, Get-AzDistinctValues)
@@ -996,19 +996,13 @@ function Show-ManageLicenses {
     $bCl  = New-CloseButton -X 545 -Y 415 -W 110 -H 30
     $f.Controls.Add($bRev); $f.Controls.Add($bAss); $f.Controls.Add($bCl)
 
-    $cfgGrp = @()
-    if ($Config.PSObject.Properties["license_groups"]) { $cfgGrp = @($Config.license_groups) }
-
     # Scriptblock de rafraîchissement réutilisable
     $RefreshLic = {
         $lstA.Items.Clear(); $lstV.Items.Clear(); $bRev.Enabled = $false; $bAss.Enabled = $false
         try {
             $mo = Get-MgUserMemberOf -UserId $UserId -ErrorAction Stop
             $mgn = @($mo | ForEach-Object { if ($_.AdditionalProperties.ContainsKey("displayName")) { $_.AdditionalProperties.displayName } })
-            foreach ($g in $cfgGrp) {
-                if ($g -in $mgn) { $lstA.Items.Add($g, $false) | Out-Null } else { $lstV.Items.Add($g, $false) | Out-Null }
-            }
-            foreach ($n in $mgn) { if ($n -notin $cfgGrp -and $n -like "LIC-*") { $lstA.Items.Add("* $n", $false) | Out-Null } }
+            foreach ($n in $mgn) { if ($n -like "LIC-*") { $lstA.Items.Add("* $n", $false) | Out-Null } }
         } catch { Write-Log -Level "ERROR" -Action "LOAD_LICENSES" -UPN $UPN -Message $_.Exception.Message }
     }
     $f.Add_Shown({ & $RefreshLic })
@@ -1077,7 +1071,7 @@ function Show-ChangeAccessProfile {
     # Vérifier que les profils sont configurés
     if (-not $Config.PSObject.Properties["access_profiles"]) {
         Show-ResultDialog -Titre (Get-Text "modification.profile_change_title") `
-            -Message "Aucun profil d'accès configuré pour ce client." -IsSuccess $false
+            -Message (Get-Text "modification.profile_not_configured") -IsSuccess $false
         return
     }
 
@@ -1286,7 +1280,7 @@ function Show-ManageGroups {
                 }
             }
             $lcV.Text = Get-Text "modification.groups_count" $lstV.Items.Count
-        } catch { $lcV.Text = "Erreur : $($_.Exception.Message)" }
+        } catch { $lcV.Text = Get-Text "modification.groups_search_error" $_.Exception.Message }
     }
     $bSr.Add_Click({ & $SrchG })
     $tSr.Add_KeyDown({ if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Enter) { & $SrchG; $_.SuppressKeyPress = $true } })
@@ -1347,7 +1341,7 @@ function Show-ResetPassword {
     $result = Reset-AzUserPassword -UserId $UserId -NewPassword $pw -ForceChange $Config.password_policy.force_change_at_login
     if ($result.Success) {
         Write-Log -Level "SUCCESS" -Action "RESET_PASSWORD" -UPN $UPN -Message "Mot de passe réinitialisé."
-        Show-PasswordDialog -UPN $UPN -Password $pwPlain
+        Show-PasswordDialog -UPN $UPN -InitialToken $pwPlain
     } else {
         Show-ResultDialog -Titre (Get-Text "modification.error_title") -Message (Get-Text "modification.password_error" $result.Error) -IsSuccess $false
     }
@@ -1357,13 +1351,13 @@ function Invoke-RevokeSession {
     param([string]$UserId, [string]$UPN)
     $confirm = Show-ConfirmDialog -Titre (Get-Text "modification.revoke_title") -Message (Get-Text "modification.revoke_confirm" $UPN)
     if (-not $confirm) { return }
-    try {
-        Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/v1.0/users/$UserId/revokeSignInSessions" -ErrorAction Stop | Out-Null
+    $result = Revoke-AzUserSessions -UserId $UserId
+    if ($result.Success) {
         Write-Log -Level "SUCCESS" -Action "REVOKE_SESSIONS" -UPN $UPN -Message "Sessions révoquées."
         Show-ResultDialog -Titre (Get-Text "modification.success_title") -Message (Get-Text "modification.revoke_success") -IsSuccess $true
-    } catch {
-        Write-Log -Level "ERROR" -Action "REVOKE_SESSIONS" -UPN $UPN -Message $_.Exception.Message
-        Show-ResultDialog -Titre (Get-Text "modification.error_title") -Message $_.Exception.Message -IsSuccess $false
+    } else {
+        Write-Log -Level "ERROR" -Action "REVOKE_SESSIONS" -UPN $UPN -Message $result.Error
+        Show-ResultDialog -Titre (Get-Text "modification.error_title") -Message $result.Error -IsSuccess $false
     }
 }
 

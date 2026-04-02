@@ -198,7 +198,7 @@ function New-UsernameVariants {
         }
     }
 
-    Write-Log -Level "INFO" -Action "USERNAME" -Message "Variantes générées pour '$Prenom $Nom' : $($resultats | ForEach-Object { $_.UPN }) "
+    Write-Log -Level "INFO" -Action "USERNAME" -Message "Variantes générées pour '$Prenom $Nom' : $($resultats | ForEach-Object { $_.UPN })"
 
     return $resultats
 }
@@ -451,7 +451,12 @@ function Show-PasswordDialog {
     $btnCopier.Add_Click({
         $clipText = "$(Get-Text 'password_dialog.clipboard_user'): $UPN`n$(Get-Text 'password_dialog.clipboard_pass'): $InitialToken"
         [System.Windows.Forms.Clipboard]::SetText($clipText)
-        [System.Windows.Forms.MessageBox]::Show(    (Get-Text "password_dialog.copied_msg"), (Get-Text "password_dialog.copied_title"), [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+        [System.Windows.Forms.MessageBox]::Show(
+            (Get-Text "password_dialog.copied_msg"),
+            (Get-Text "password_dialog.copied_title"),
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        ) | Out-Null
     })
     $form.Controls.Add($btnCopier)
 
@@ -546,49 +551,6 @@ function Send-Notification {
     }
 }
 
-function Test-GraphConnection {
-    <#
-    .SYNOPSIS
-        Vérifie que le token Graph est valide en effectuant un appel simple.
-
-    .OUTPUTS
-        [bool] — $true si la connexion est fonctionnelle.
-    #>
-    [CmdletBinding()]
-    param()
-
-    try {
-        $context = Get-MgContext
-        if ($null -eq $context) { return $false }
-
-        # Test avec un appel léger
-        Get-MgOrganization -ErrorAction Stop | Out-Null
-        return $true
-    }
-    catch {
-        return $false
-    }
-}
-
-function Get-MailNickname {
-    <#
-    .SYNOPSIS
-        Génère le MailNickname à partir du UPN (partie avant le @).
-
-    .PARAMETER UPN
-        UserPrincipalName complet.
-
-    .OUTPUTS
-        [string] — MailNickname.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$UPN
-    )
-
-    return $UPN.Split('@')[0]
-}
 
 function Get-AccessProfiles {
     <#
@@ -623,7 +585,7 @@ function Get-AccessProfiles {
             Description = $ap.description
             IsBaseline  = [bool]$ap.is_baseline
             Groups      = @($ap.groups)
-}
+        }
     }
 
     return $profiles
@@ -869,7 +831,7 @@ function Get-UserActiveProfiles {
         $profiles = Get-AccessProfiles -ExcludeBaseline
 
         foreach ($ap in $profiles) {
-                if ($ap.Groups.Count -eq 0) { continue }
+            if ($ap.Groups.Count -eq 0) { continue }
 
             # Vérifier que TOUS les groupes du profil sont présents
             $allPresent = $true
@@ -897,11 +859,6 @@ function Get-UserActiveProfiles {
         return @()
     }
 }
-
-# =============================================================================
-#  RÉCONCILIATION — Fonctions à AJOUTER à la fin de AccessProfiles_Functions.ps1
-#  (avant le commentaire "Point d'attention")
-# =============================================================================
 
 function Get-ProfileReconciliation {
     <#

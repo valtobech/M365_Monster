@@ -11,8 +11,7 @@
 
 .DEPENDANCES
     - Core/Functions.ps1 (New-UsernameVariants, New-SecurePassword, Write-Log,
-      Show-ConfirmDialog, Show-ResultDialog, Show-PasswordDialog, Get-MailNickname,
-      Remove-Diacritics)
+      Show-ConfirmDialog, Show-ResultDialog, Show-PasswordDialog, Remove-Diacritics)
     - Core/GraphAPI.ps1 (New-AzUser, Add-AzUserToGroup, Set-AzUserManager,
       Search-AzUsers, Search-AzGroups, Get-AzDistinctValues, Test-AzUserExists)
     - Variable globale $Config
